@@ -4,13 +4,16 @@ on:
     inputs:
       operation:
         type: choice
-        options: [oidc-check, plan, apply, e2e]
+        options: [oidc-check, image-transport, plan, apply, e2e]
         required: true
       oidc_environment:
         description: Identity to verify (oidc-check only)
         type: choice
         options: [fleet-plan, fleet-apply]
         default: fleet-plan
+      approved_image_transport_plan_sha256:
+        description: Exact privately reviewed image transport plan hash (image-transport only)
+        type: string
       plan_run_id:
         description: Prior plan run ID (apply only)
         type: string
@@ -112,3 +115,79 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 scripts/cloud-e2e.py /run/fleet/inventory.json
+
+  image-transport:
+    if: github.ref == 'refs/heads/main' && inputs.operation == 'image-transport'
+    environment: fleet-apply
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            system: x86_64-linux
+            node: node2
+            efi: BOOTX64.EFI
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+            node: node3
+            efi: BOOTAA64.EFI
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE_TRANSPORT_ENABLED: ${{ vars.IMAGE_TRANSPORT_ENABLED }}
+      APPROVED_IMAGE_TRANSPORT_PLAN_SHA256: ${{ inputs.approved_image_transport_plan_sha256 }}
+      PRIVATE_IMAGE_TRANSPORT_PLAN: ${{ secrets.IMAGE_TRANSPORT_PLAN_JSON }}
+      OIDC_CHECK_ENABLED: ${{ vars.OIDC_CHECK_ENABLED }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      FLEET_RESOURCE_GROUP: ${{ vars.FLEET_RESOURCE_GROUP }}
+      EXPECTED_NODE: ${{ matrix.node }}
+      EXPECTED_SYSTEM: ${{ matrix.system }}
+      EXPECTED_EFI: ${{ matrix.efi }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: tooling
+      - name: Validate explicit private transport approval before login
+        run: |
+          umask 077
+          python3 - <<'PYCODE'
+          import os, pathlib
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'fleet-image-transport.json').write_text(os.environ['PRIVATE_IMAGE_TRANSPORT_PLAN'])
+          PYCODE
+          python3 tooling/scripts/transport-image.py "$RUNNER_TEMP/fleet-image-transport.json"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ba51125b3d367b8326b357023a5ad5812239b7a9
+          path: image-source
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+          extra_nix_config: |
+            system-features = nixos-test benchmark big-parallel kvm
+      - name: Rebuild verified source and inspect actual artifact
+        working-directory: image-source
+        run: |
+          test "$(git rev-parse HEAD)" = ba51125b3d367b8326b357023a5ad5812239b7a9
+          nix build -L ".#packages.$EXPECTED_SYSTEM.azure-$EXPECTED_NODE" --out-link result
+          bash ../tooling/scripts/inspect-vhd.sh
+      - uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac
+        with:
+          audience: api://AzureADTokenExchange
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify existing Reader scope and retain private rebuilt image
+        working-directory: image-source
+        run: |
+          python3 ../tooling/scripts/azure-oidc-check.py
+          vhd=$(find -L result -maxdepth 1 -name '*.vhd' -print)
+          python3 ../tooling/scripts/transport-image.py "$RUNNER_TEMP/fleet-image-transport.json" --node "$EXPECTED_NODE" --vhd "$vhd" --report image-report.json --upload
+      - name: Remove local private plan
+        if: always()
+        run: rm -f "$RUNNER_TEMP/fleet-image-transport.json"

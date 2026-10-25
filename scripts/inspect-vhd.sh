@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+vhd=$(find -L result -maxdepth 1 -name '*.vhd' -print)
+test -n "$vhd"
+python3 scripts/validate-vhd.py "$vhd"
+loop=$(sudo losetup --find --show --partscan --read-only "$vhd")
+trap 'sudo umount /tmp/fleet-root /tmp/fleet-efi 2>/dev/null || true; sudo losetup -d "$loop"' EXIT
+mkdir -p /tmp/fleet-root /tmp/fleet-efi
+sudo udevadm settle
+rootpart=""; efipart=""
+while read -r candidate; do
+  fstype=$(sudo blkid -p -s TYPE -o value "$candidate" || true)
+  case "$fstype" in
+    ext4) test -z "$rootpart"; rootpart="$candidate" ;;
+    vfat) test -z "$efipart"; efipart="$candidate" ;;
+  esac
+done < <(lsblk -nrpo NAME "$loop")
+test -n "$rootpart" && test -n "$efipart"
+sudo mount -o ro,noload "$rootpart" /tmp/fleet-root
+sudo mount -o ro "$efipart" /tmp/fleet-efi
+sudo find /tmp/fleet-efi -iname "$EXPECTED_EFI" | grep .
+sudo find /tmp/fleet-root/etc/ssh -name 'ssh_host_*_key' -print 2>/dev/null | (! grep .)
+# /etc files point into the image's own store: inspect through chroot.
+sudo chroot /tmp/fleet-root /nix/var/nix/profiles/system/sw/bin/cat /etc/fleet-image.json > image-report.json
+python3 - <<'PY'
+import json, os
+data = json.load(open('image-report.json'))
+assert data['hostname'] == os.environ['EXPECTED_NODE']
+assert data['system'] == os.environ['EXPECTED_SYSTEM']
+assert data['repositorySubdir'] == 'nodes/' + os.environ['EXPECTED_NODE']
+assert data['branch'] == 'main' and data['deploymentApproved'] is False
+print(json.dumps(data))
+PY
