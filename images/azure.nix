@@ -8,7 +8,7 @@
     ({ config, lib, pkgs, modulesPath, ... }: {
       networking.hostName = hostname;
       system.configurationRevision = revision;
-      virtualisation.diskSize = 4096;
+      virtualisation.diskSize = 8192; # Build closure exceeded 4 GiB; no cloud disk is allocated here.
       lab.overlayIPv6 = if hostname == "node2" then "fd42:6e69:7800::2" else "fd42:6e69:7800::3";
       # Image preparation is not network/deployment approval. SSH ingress stays closed.
       lab.enable = false;

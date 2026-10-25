@@ -18,7 +18,7 @@ pkgs.testers.runNixOSTest {
       useBootLoader = true;
       useEFIBoot = true;
       diskSize = 4096;
-      additionalPaths = [ (builtins.unsafeDiscardOutputDependency config.specialisation.updated.configuration.system.build.toplevel.drvPath) ];
+      additionalPaths = [ config.specialisation.updated.configuration.system.build.toplevel pkgs.coreutils ];
     };
   };
   nodes.client = { ... }: {
@@ -33,12 +33,11 @@ pkgs.testers.runNixOSTest {
         outputs = { self }: {
           nixosConfigurations.server.config = {
             services.comin.machineId = null;
-            system.build.toplevel = {
-              type = "derivation";
+            system.build.toplevel = builtins.derivation {
+              name = "comin-prebuilt-generation";
               system = "x86_64-linux";
-              drvPath = "${builtins.unsafeDiscardOutputDependency updated.drvPath}";
-              outPath = "${updated}";
-              outputName = "out";
+              builder = "${pkgs.coreutils}/bin/ln";
+              args = [ "-s" "${updated}" (builtins.placeholder "out") ];
             };
           };
         };
@@ -68,7 +67,8 @@ pkgs.testers.runNixOSTest {
     server.succeed("systemctl restart comin")
     server.wait_for_unit("comin.service")
     # Main advances to a real NixOS generation. Comin evaluates the flake,
-    # invokes nix build on its real derivation (closure prebuilt by CI), and switches.
+    # invokes nix build to wrap the real prebuilt generation, and switches.
+    # This tests activation/reboot, not source compilation within the 1-GiB guest.
     server.succeed("cp ${fixture} /var/lib/comin-test-repo/flake.nix; cd /var/lib/comin-test-repo; git add flake.nix; git commit -m update")
     server.wait_until_succeeds("grep -qx updated /etc/fleet-generation", timeout=300)
     server.succeed("test $(readlink -f /run/current-system) = ${updated}")
