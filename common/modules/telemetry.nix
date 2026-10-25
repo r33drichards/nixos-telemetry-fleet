@@ -35,6 +35,7 @@ in {
         security = { admin_user = "admin"; secret_key = "$__file{/run/credentials/grafana.service/secret-key}"; admin_password = "$__file{/run/credentials/grafana.service/admin-password}"; cookie_secure = false; cookie_samesite = "strict"; };
         "auth.anonymous".enabled = false;
         users.allow_sign_up = false;
+        plugins.preinstall_disabled = true;
         analytics = { reporting_enabled = false; check_for_updates = false; };
       };
       provision = {

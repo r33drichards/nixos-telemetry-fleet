@@ -2,6 +2,8 @@
 
 ## Current capability and 1-GiB qualification changes
 
+The 1024-MiB profile passed at commit `28ae071954b6bbe8ad07ebc253f278d24b90f95e`, including telemetry ingestion, authentication, reboot and zero service OOM counters. Grafana attempted optional plugin downloads and recovered slowly in the isolated network. The profile now disables automatic optional plugin preinstallation using [Grafana configuration](https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/); verify the latest CI head for that follow-up. No signature verification is disabled.
+
 New local checks reject subscription region/zone restrictions, unsupported/unknown Trusted Launch, architecture mismatch and invalid Terraform attestations. No live subscription query was run in this workspace. CI now includes a separate real 1024-MiB telemetry/Wasm guest profile; its result must be checked at the current PR head. Earlier 1536-MiB results below do not prove 1-GiB fit.
 
 ## Terraform and Wasm E2E development
