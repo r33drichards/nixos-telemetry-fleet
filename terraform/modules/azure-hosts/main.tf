@@ -11,6 +11,7 @@ resource "azurerm_linux_virtual_machine" "node" {
   for_each                        = var.enabled ? var.nodes : {}
   name                            = each.key
   location                        = each.value.location
+  zone                            = each.value.zone
   resource_group_name             = each.value.resource_group_name
   size                            = each.value.size
   source_image_id                 = each.value.source_image_id

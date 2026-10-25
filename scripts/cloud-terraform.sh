@@ -12,6 +12,7 @@ if ! terraform -chdir=terraform init -input=false -lockfile=readonly -backend-co
   echo 'Backend init failed; inspect via approved private diagnostics.' >&2; exit 1
 fi
 if [ "$OPERATION" = plan ]; then
+  python3 scripts/azure-sku-preflight.py "$work/topology.tfvars.json"
   if ! terraform -chdir=terraform plan -input=false -lock-timeout=60s -var-file="$work/topology.tfvars.json" -out="$work/plan" >"$work/plan.log" 2>&1; then
     echo 'Cloud plan failed; inspect via approved private diagnostics.' >&2; exit 1
   fi
@@ -28,6 +29,8 @@ elif [ "$OPERATION" = apply ]; then
   done
   test "$(cat "$work/revision")" = "$GITHUB_SHA"
   test "$(sha256sum "$work/plan" | cut -d' ' -f1)" = "$APPROVED_PLAN_SHA256"
+  terraform -chdir=terraform show -json "$work/plan" > "$work/plan.json" 2>"$work/show.log"
+  python3 scripts/azure-sku-preflight.py --plan-json "$work/plan.json"
   if ! terraform -chdir=terraform apply -input=false -lock-timeout=60s "$work/plan" >"$work/apply.log" 2>&1; then
     echo 'Apply failed or partially completed. Inspect private state before any retry.' >&2; exit 1
   fi

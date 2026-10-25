@@ -7,6 +7,13 @@
       inherit common;
       comin = common.inputs.comin;
     };
+    checks.x86_64-linux.boot-overlay-wasm-1gib = import ./tests/boot-overlay-wasm.nix {
+      pkgs = common.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      inherit common;
+      comin = common.inputs.comin;
+      memoryMiB = 1024;
+      qualifyTelemetry = true;
+    };
     nixosConfigurations = {
       node1 = common.lib.mkNode { revision = self.rev or null; system = "x86_64-linux"; name = "node1"; extraModules = [ ./nodes/node1/deployment.nix ]; address = "fd42:6e69:7800::1"; };
       node2 = common.lib.mkNode { revision = self.rev or null; system = "x86_64-linux"; name = "node2"; extraModules = [ ./nodes/node2/deployment.nix ]; address = "fd42:6e69:7800::2"; telemetry = true; };

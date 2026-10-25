@@ -65,6 +65,8 @@ Microsoft.Network/virtualNetworks/subnets/read
 Microsoft.Network/virtualNetworks/subnets/join/action
 ```
 
+The new live SKU preflight additionally requires subscription-scoped `Microsoft.Compute/skus/read`. That read-only metadata exception needs separate approval for the relevant principals; it grants no resource writes. No such permission was added. Until approved, the preflight fails closed.
+
 This is a candidate action set for the existing-NIC/image VM module, not a live-validated grant. If provider initialization or operations require more metadata reads, report the exact denied action and scope for review; never silently assign a broader role. VM Contributor is not substituted because it includes broader VM execution/NIC-management powers. Network provisioning, image upload, state-account creation and role assignment are excluded and require separate approved actions.
 
 ## State and remaining decisions

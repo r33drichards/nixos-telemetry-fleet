@@ -1,5 +1,9 @@
 # Validation record
 
+## Current capability and 1-GiB qualification changes
+
+New local checks reject subscription region/zone restrictions, unsupported/unknown Trusted Launch, architecture mismatch and invalid Terraform attestations. No live subscription query was run in this workspace. CI now includes a separate real 1024-MiB telemetry/Wasm guest profile; its result must be checked at the current PR head. Earlier 1536-MiB results below do not prove 1-GiB fit.
+
 ## Terraform and Wasm E2E development
 
 Initial Actions run 40228914573 at commit `87361e05616d09c31afd33b79ab7db76c5adf00f` failed because `common/modules/wasm.nix` was absent. This establishes the red test before implementation. Terraform root/module validation and all three mock-provider tests pass locally; Actions Terraform run 40229114257 also passed. The next VM run booted NixOS and started WireGuard, then exposed Spin attempting to write state inside the read-only Nix store. The module now explicitly uses `/var/lib/wasm-http/state`. PASS: Actions VM run 40230137476 at `d3999ccea97d0f551e9abd06fcd10741c9ee20de` completed actual NixOS boot, WireGuard-private Wasm HTTP, exporter metrics, rejection of underlay HTTP access, file-mode checks and reboot persistence. Terraform run 40230137422 passed at the same commit. The metrics assertion was fixed to consume its entire response rather than causing curl SIGPIPE. Subsequent heads must retain passing checks; PR #1 records the current result.
