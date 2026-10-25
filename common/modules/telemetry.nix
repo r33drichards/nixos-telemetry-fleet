@@ -6,20 +6,16 @@ in {
   options.lab = {
     telemetry = lib.mkOption { type = lib.types.bool; default = false; };
     telemetryCapacityApproved = lib.mkOption { type = lib.types.bool; default = false; };
-    publicGrafana = lib.mkEnableOption "approved public HTTPS Grafana";
-    grafanaHostname = lib.mkOption { type = lib.types.str; default = ""; };
-    acmeEmail = lib.mkOption { type = lib.types.str; default = ""; };
-    grafanaSecretKeyFile = lib.mkOption { type = lib.types.str; default = "/run/secrets/grafana-secret-key"; };
-    grafanaPasswordFile = lib.mkOption { type = lib.types.str; default = "/run/secrets/grafana-admin-password"; };
+    grafanaSecretKeyFile = lib.mkOption { type = lib.types.str; default = "/var/lib/fleet-secrets/grafana-secret-key"; };
+    grafanaPasswordFile = lib.mkOption { type = lib.types.str; default = "/var/lib/fleet-secrets/grafana-admin-password"; };
     scrapeTargets = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ "[fd42:6e69:7800::1]:9100" "[fd42:6e69:7800::2]:9100" "[fd42:6e69:7800::3]:9100" ];
+      default = [ "[fd42:6e69:7800::2]:9100" "[fd42:6e69:7800::3]:9100" ];
     };
   };
   config = {
     assertions = [
       { assertion = !active || cfg.telemetryCapacityApproved; message = "Telemetry on 1 GiB is unmeasured; approve the resource experiment explicitly."; }
-      { assertion = !cfg.publicGrafana || (active && cfg.grafanaHostname != "" && cfg.acmeEmail != ""); message = "Public Grafana needs active telemetry and approved DNS/TLS settings."; }
       { assertion = lib.hasPrefix "/run/" cfg.grafanaSecretKeyFile || lib.hasPrefix "/var/lib/" cfg.grafanaSecretKeyFile; message = "Grafana encryption key must remain outside the Nix store."; }
       { assertion = lib.hasPrefix "/run/" cfg.grafanaPasswordFile || lib.hasPrefix "/var/lib/" cfg.grafanaPasswordFile; message = "Grafana credential must be a runtime file outside the Nix store."; }
     ];
@@ -35,10 +31,11 @@ in {
     services.grafana = {
       enable = active;
       settings = {
-        server = { http_addr = "127.0.0.1"; http_port = 3000; domain = if cfg.grafanaHostname == "" then "localhost" else cfg.grafanaHostname; root_url = if cfg.publicGrafana then "https://${cfg.grafanaHostname}/" else "http://localhost:3000/"; };
-        security = { admin_user = "admin"; secret_key = "$__file{/run/credentials/grafana.service/secret-key}"; admin_password = "$__file{/run/credentials/grafana.service/admin-password}"; cookie_secure = cfg.publicGrafana; cookie_samesite = "strict"; };
+        server = { http_addr = "127.0.0.1"; http_port = 3000; domain = "localhost"; root_url = "http://localhost:3000/"; };
+        security = { admin_user = "admin"; secret_key = "$__file{/run/credentials/grafana.service/secret-key}"; admin_password = "$__file{/run/credentials/grafana.service/admin-password}"; cookie_secure = false; cookie_samesite = "strict"; };
         "auth.anonymous".enabled = false;
         users.allow_sign_up = false;
+        plugins.preinstall_disabled = true;
         analytics = { reporting_enabled = false; check_for_updates = false; };
       };
       provision = {
@@ -49,14 +46,8 @@ in {
     };
     systemd.services = lib.mkIf active {
       prometheus = { after = [ "wg-quick-wg0.service" ]; wants = [ "wg-quick-wg0.service" ]; serviceConfig = { MemoryHigh = "160M"; MemoryMax = "256M"; CPUQuota = "30%"; }; };
+      grafana.unitConfig.RequiresMountsFor = [ cfg.grafanaPasswordFile cfg.grafanaSecretKeyFile ];
       grafana.serviceConfig = { LoadCredential = [ "admin-password:${cfg.grafanaPasswordFile}" "secret-key:${cfg.grafanaSecretKeyFile}" ]; MemoryHigh = "160M"; MemoryMax = "256M"; CPUQuota = "30%"; };
     };
-    # Caddy obtains certificates only after explicit DNS/TLS/firewall approval.
-    services.caddy = lib.mkIf cfg.publicGrafana {
-      enable = true;
-      email = cfg.acmeEmail;
-      virtualHosts."${cfg.grafanaHostname}".extraConfig = "reverse_proxy 127.0.0.1:3000";
-    };
-    networking.firewall.allowedTCPPorts = lib.mkIf cfg.publicGrafana [ 80 443 ];
   };
 }

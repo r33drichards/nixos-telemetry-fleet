@@ -1,4 +1,26 @@
+> Latest scope supersedes the historical service sections below: TWO bare Azure NixOS hosts (AMD + ARM), SSH and Comin only. Optional WireGuard, telemetry, Wasm and Kubernetes are disabled and are not acceptance requirements. See README for the active profile.
+
 # Validation record
+
+## Current capability and 1-GiB qualification changes
+
+The 1024-MiB profile passed at commit `28ae071954b6bbe8ad07ebc253f278d24b90f95e`, including telemetry ingestion, authentication, reboot and zero service OOM counters. Grafana attempted optional plugin downloads and recovered slowly in the isolated network. The profile now disables automatic optional plugin preinstallation using [Grafana configuration](https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/); verify the latest CI head for that follow-up. No signature verification is disabled.
+
+New local checks reject subscription region/zone restrictions, unsupported/unknown Trusted Launch, architecture mismatch and invalid Terraform attestations. No live subscription query was run in this workspace. CI now includes a separate real 1024-MiB telemetry/Wasm guest profile; its result must be checked at the current PR head. Earlier 1536-MiB results below do not prove 1-GiB fit.
+
+## Terraform and Wasm E2E development
+
+Initial Actions run 40228914573 at commit `87361e05616d09c31afd33b79ab7db76c5adf00f` failed because `common/modules/wasm.nix` was absent. This establishes the red test before implementation. Terraform root/module validation and all three mock-provider tests pass locally; Actions Terraform run 40229114257 also passed. The next VM run booted NixOS and started WireGuard, then exposed Spin attempting to write state inside the read-only Nix store. The module now explicitly uses `/var/lib/wasm-http/state`. PASS: Actions VM run 40230137476 at `d3999ccea97d0f551e9abd06fcd10741c9ee20de` completed actual NixOS boot, WireGuard-private Wasm HTTP, exporter metrics, rejection of underlay HTTP access, file-mode checks and reboot persistence. Terraform run 40230137422 passed at the same commit. The metrics assertion was fixed to consume its entire response rather than causing curl SIGPIPE. Subsequent heads must retain passing checks; PR #1 records the current result.
+
+The cached Spin archive, extracted executable and upstream Wasm component were hash-verified and a fresh local loopback HTTP smoke test returned 200 and the exact `hello from wasm` body. This does not establish NixOS boot or cloud networking. Missing cloud inventory fails the live E2E script rather than skipping.
+
+The cloud workspace lacks `/dev/kvm` and QEMU. Its cache.nixos.org request is denied by the proxy with HTTP 403 even on the host. GitHub HTTPS works with the host trust store, while the disposable Nix container reported an untrusted certificate chain despite readable CA files. These are separate network-policy and container-trust problems; certificate verification was never disabled, proxy routing was not bypassed, and no CA trust changes were made. The authorized GitHub runner successfully downloaded pinned inputs and has KVM, so VM qualification runs there.
+
+## Earlier host-local secret revision
+
+Public Grafana configuration was removed; access is deferred. Secret source defaults now use durable `/var/lib/fleet-secrets` files, loaded through systemd credentials for WireGuard and Grafana. Four structural tests and whitespace checks pass. Nix 2.30.2 parses all changed Nix files successfully. Full evaluation of this revision is BLOCKED: the container proxy rejected cache.nixos.org with HTTP 403 and the uncached GitHub source failed certificate verification. Available local source excerpts are incomplete and cannot replace the pinned inputs. Earlier evaluation results below apply only to the earlier snapshot; rerun `make eval profile-check` when the pinned inputs are accessible. No real credentials were created and no host was activated.
+
+## Earlier published snapshot
 
 Cloud workspace, 2026-10-25. No machine, network, account, credential, DNS record or cloud resource was created or modified.
 

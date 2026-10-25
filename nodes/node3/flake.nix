@@ -3,6 +3,7 @@
   inputs.common.url = "path:../../common";
   outputs = { self, common }: {
     nixosConfigurations.node3 = common.lib.mkNode {
+      revision = self.rev or null;
       system = "aarch64-linux";
       name = "node3";
       extraModules = [ ./deployment.nix ];

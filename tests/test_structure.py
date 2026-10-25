@@ -18,4 +18,4 @@ class Structure(unittest.TestCase):
     def test_no_secret_or_state_files_tracked(self):
         import subprocess
         paths=subprocess.check_output(['git','ls-files'],cwd=ROOT,text=True).splitlines()
-        self.assertFalse(any(p.startswith('.local/') or p.endswith(('.tfstate','.pem','.key')) for p in paths))
+        self.assertFalse(any(p.startswith('.local/') or p.endswith(('.tfstate','.pem','.key','.age')) or '.sops.' in p or p.startswith('secrets/') for p in paths))

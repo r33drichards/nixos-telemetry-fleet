@@ -1,0 +1,32 @@
+name: NixOS VM E2E
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: vm-e2e-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  boot-ssh-comin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+          extra_nix_config: |
+            system-features = nixos-test benchmark big-parallel kvm
+      - name: Require VM acceleration
+        run: test -r /dev/kvm && test -w /dev/kvm
+      - name: Verify pinned image transfer tool without cloud access
+        run: nix shell github:NixOS/nixpkgs/da6dc0e7b26060f2f71ce3ef7088fb56ee44fa36#azure-storage-azcopy -c azure-storage-azcopy --version
+      - name: Evaluate fleet and enabled profiles
+        run: make eval profile-check
+      - name: Boot NixOS and verify SSH, Comin update and reboot
+        run: nix build -L .#checks.x86_64-linux.boot-ssh-comin
