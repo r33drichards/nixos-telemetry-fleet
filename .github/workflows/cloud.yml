@@ -1,0 +1,78 @@
+name: Approved Azure host orchestration
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [plan, apply, e2e]
+        required: true
+      plan_run_id:
+        description: Prior plan run ID (apply only)
+        type: string
+      approved_plan_sha256:
+        description: Exact privately reviewed saved-plan hash (apply only)
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: fleet-cloud-state
+  cancel-in-progress: false
+jobs:
+  terraform:
+    if: inputs.operation != 'e2e'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ inputs.operation == 'apply' && 'fleet-apply' || 'fleet-plan' }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: 'true'
+      ARM_USE_AZUREAD: 'true'
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      OPERATION: ${{ inputs.operation }}
+      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+      APPROVED_PLAN_SHA256: ${{ inputs.approved_plan_sha256 }}
+      FLEET_ENABLED: ${{ vars.FLEET_ENABLED }}
+      BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG }}
+      TOPOLOGY: ${{ secrets.TF_TOPOLOGY_JSON }}
+      PLAN_STORAGE_ACCOUNT: ${{ secrets.PLAN_STORAGE_ACCOUNT }}
+      PLAN_CONTAINER: ${{ secrets.PLAN_CONTAINER }}
+    steps:
+      - name: Require approved main revision and environment setup
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          test "$FLEET_ENABLED" = explicitly-approved
+          test -n "$BACKEND_CONFIG" && test -n "$ARM_CLIENT_ID"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.14.0
+          terraform_wrapper: false
+      - uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Plan privately or apply exact approved plan
+        run: bash scripts/cloud-terraform.sh
+  cloud-e2e:
+    if: inputs.operation == 'e2e'
+    environment: fleet-e2e
+    # Dedicated ephemeral runner with approved private reachability; never PR code.
+    runs-on: [self-hosted, fleet-e2e]
+    timeout-minutes: 15
+    env:
+      FLEET_ENABLED: ${{ vars.FLEET_ENABLED }}
+    steps:
+      - run: test "$GITHUB_REF" = refs/heads/main && test "$FLEET_ENABLED" = explicitly-approved
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: python3 scripts/cloud-e2e.py /run/fleet/inventory.json

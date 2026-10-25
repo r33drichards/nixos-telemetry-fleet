@@ -7,7 +7,7 @@
     lib.mkNode = { system, name, address, telemetry ? false, extraModules ? [] }: nixpkgs.lib.nixosSystem {
       inherit system;
       modules = [
-        comin.nixosModules.comin ./modules/base.nix ./modules/telemetry.nix
+        comin.nixosModules.comin ./modules/base.nix ./modules/telemetry.nix ./modules/wasm.nix
         ({ ... }: {
           networking.hostName = name;
           lab.overlayIPv6 = address;

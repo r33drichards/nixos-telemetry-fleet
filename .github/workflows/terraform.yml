@@ -1,0 +1,26 @@
+name: Terraform checks
+on: [pull_request, push]
+permissions:
+  contents: read
+jobs:
+  validate-and-mock-plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ARM_SUBSCRIPTION_ID: 00000000-0000-0000-0000-000000000000
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.14.0
+          terraform_wrapper: false
+      - run: |
+          terraform -chdir=terraform fmt -check -recursive
+          terraform -chdir=terraform init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=terraform validate
+          terraform -chdir=terraform test
+          terraform -chdir=terraform/modules/azure-hosts init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=terraform/modules/azure-hosts test
+          make check
