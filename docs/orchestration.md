@@ -28,7 +28,7 @@ After approval, enable the selected node modules and `lab.wasm.enable` only on a
 
 ## Actual cloud E2E
 
-A dedicated ephemeral self-hosted runner labeled `fleet-e2e` must have separately approved private reachability. Never expose it to PR workflows. Deliver `/run/fleet/inventory.json`, `/run/fleet/ssh_key` and verified `/run/fleet/known_hosts` outside Git with restrictive permissions. `python3 scripts/cloud-e2e.py /run/fleet/inventory.json` requires three distinct actual NixOS hosts, active WireGuard/Comin/exporters, every cross-node metrics path, and an exact HTTP response from an actual Wasm service. Missing inventory or connectivity fails; there are no skips. It does not perform a disruptive live reboot or claim Knative/MCPJS coverage. Private SSH diagnostics remain outside public logs.
+A dedicated ephemeral self-hosted runner labeled `fleet-e2e` must have separately approved private reachability. Never expose it to PR workflows. Deliver `/run/fleet/inventory.json`, `/run/fleet/ssh_key` and verified `/run/fleet/known_hosts` outside Git with restrictive permissions. `python3 scripts/cloud-e2e.py /run/fleet/inventory.json` requires three distinct actual NixOS machine identities at the workflow source revision, unscoped ULA overlay addresses, active WireGuard/Comin/exporters, every cross-node metrics path, and an exact HTTP response from an actual Wasm service. Missing inventory or connectivity fails; there are no skips. It does not perform a disruptive live reboot or claim Knative/MCPJS coverage. Private SSH diagnostics remain outside public logs.
 
 ## Exact next approval bundle
 

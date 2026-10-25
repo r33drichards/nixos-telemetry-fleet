@@ -13,10 +13,11 @@ nodes = inventory['nodes']
 assert len(nodes) == 3, 'Exactly three actual hosts required'
 assert len({n['ssh'] for n in nodes}) == 3, 'Hosts must be distinct'
 assert any(n.get('wasm') for n in nodes), 'An actual Wasm host is required'
+assert len({n['overlay'] for n in nodes}) == 3, 'Overlay addresses must be distinct'
 for node in nodes:
     assert re.fullmatch(r'operator@[A-Za-z0-9.:\[\]-]+', node['ssh']), 'Invalid SSH destination'
-    assert ipaddress.ip_address(node['overlay']).version == 6
-    assert ipaddress.ip_address(node['overlay']).is_private
+    assert re.fullmatch(r'[0-9a-fA-F:]+', node['overlay']), 'Unscoped IPv6 address required'
+    assert ipaddress.ip_address(node['overlay']) in ipaddress.ip_network('fc00::/7'), 'ULA overlay address required'
 
 def run(node, command):
     result = subprocess.run(['ssh', '-i', '/run/fleet/ssh_key', '-o', 'BatchMode=yes',
@@ -26,7 +27,12 @@ def run(node, command):
         raise RuntimeError('Cloud E2E command failed; inspect through approved private diagnostics')
     return result.stdout
 
+machine_ids = set()
 for node in nodes:
+    machine_id = run(node, "cat /etc/machine-id").strip()
+    assert re.fullmatch(rb"[0-9a-f]{32}", machine_id), "Invalid machine identity"
+    assert machine_id not in machine_ids, "Duplicate host identity"
+    machine_ids.add(machine_id)
     version = json.loads(run(node, "nixos-version --json"))
     assert version["configurationRevision"] == expected_revision, "Host configuration revision does not match approved workflow head"
     run(node, "grep -q '^ID=nixos' /etc/os-release && systemctl is-active wg-quick-wg0 comin prometheus-node-exporter")
