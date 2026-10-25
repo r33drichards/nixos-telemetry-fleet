@@ -4,11 +4,10 @@
   modules = [
     comin.nixosModules.comin
     ../common/modules/base.nix
+    ../common/modules/azure-runtime.nix
     ({ config, lib, pkgs, modulesPath, ... }: {
-      imports = [ "${modulesPath}/virtualisation/azure-image.nix" ];
       networking.hostName = hostname;
       system.configurationRevision = revision;
-      virtualisation.azureImage.vmGeneration = "v2";
       virtualisation.diskSize = 4096;
       lab.overlayIPv6 = if hostname == "node2" then "fd42:6e69:7800::2" else "fd42:6e69:7800::3";
       # Image preparation is not network/deployment approval. SSH ingress stays closed.

@@ -6,10 +6,10 @@
       nixpkgs = common.inputs.nixpkgs; comin = common.inputs.comin;
       system = "x86_64-linux"; hostname = "node2"; revision = self.rev or null;
     };
-    packages.aarch64-linux.azure-node3 = (import ./images/azure.nix {
+    packages.aarch64-linux.azure-node3 = common.inputs.nixpkgs.lib.overrideDerivation (import ./images/azure.nix {
       nixpkgs = common.inputs.nixpkgs; comin = common.inputs.comin;
       system = "aarch64-linux"; hostname = "node3"; revision = self.rev or null;
-    }).overrideAttrs (_: { requiredSystemFeatures = []; });
+    }) (_: { requiredSystemFeatures = []; });
     checks.x86_64-linux.boot-ssh-comin = import ./tests/boot-ssh-comin.nix {
       pkgs = common.inputs.nixpkgs.legacyPackages.x86_64-linux;
       comin = common.inputs.comin;

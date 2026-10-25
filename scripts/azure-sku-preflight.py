@@ -50,10 +50,10 @@ def validate(node, skus):
 
 
 def main():
-    if len(sys.argv) == 2 and sys.argv[1] == '--plan-json':
+    if len(sys.argv) == 3 and sys.argv[1] == '--plan-json':
         plan = json.loads(pathlib.Path(sys.argv[2]).read_text())
         topology = {k: v['value'] for k, v in plan['variables'].items()}
-    elif len(sys.argv) == 2:
+    elif len(sys.argv) == 2 and not sys.argv[1].startswith('--'):
         topology = json.loads(pathlib.Path(sys.argv[1]).read_text())
     else:
         raise ValueError('Private topology or saved plan JSON required')

@@ -28,7 +28,7 @@ let cfg = config.lab; in {
     environment.systemPackages = lib.mkIf cfg.enable ([ pkgs.curl ] ++ lib.optional cfg.wireguard pkgs.wireguard-tools);
     networking.useNetworkd = lib.mkIf cfg.enable true;
     networking.useDHCP = lib.mkIf cfg.enable false;
-    systemd.network.enable = cfg.enable;
+    systemd.network.enable = lib.mkIf cfg.enable true;
     systemd.network.networks."10-uplink" = lib.mkIf cfg.enable {
       matchConfig.Name = cfg.publicInterface;
       networkConfig = { DHCP = "ipv4"; IPv6AcceptRA = true; };
