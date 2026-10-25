@@ -18,7 +18,7 @@ pkgs.testers.runNixOSTest {
       useBootLoader = true;
       useEFIBoot = true;
       diskSize = 4096;
-      additionalPaths = [ config.specialisation.updated.configuration.system.build.toplevel.drvPath ];
+      additionalPaths = [ (builtins.unsafeDiscardOutputDependency config.specialisation.updated.configuration.system.build.toplevel.drvPath) ];
     };
   };
   nodes.client = { ... }: {
@@ -36,7 +36,7 @@ pkgs.testers.runNixOSTest {
             system.build.toplevel = {
               type = "derivation";
               system = "x86_64-linux";
-              drvPath = "${updated.drvPath}";
+              drvPath = "${builtins.unsafeDiscardOutputDependency updated.drvPath}";
               outPath = "${updated}";
               outputName = "out";
             };

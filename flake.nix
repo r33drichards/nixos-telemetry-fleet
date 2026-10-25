@@ -2,6 +2,14 @@
   description = "Two-node Azure fleet with retained inactive node1 template: IPv6, WireGuard, Comin and private node metrics";
   inputs.common.url = "path:./common";
   outputs = { self, common }: {
+    packages.x86_64-linux.azure-node2 = import ./images/azure.nix {
+      nixpkgs = common.inputs.nixpkgs; comin = common.inputs.comin;
+      system = "x86_64-linux"; hostname = "node2"; revision = self.rev or null;
+    };
+    packages.aarch64-linux.azure-node3 = (import ./images/azure.nix {
+      nixpkgs = common.inputs.nixpkgs; comin = common.inputs.comin;
+      system = "aarch64-linux"; hostname = "node3"; revision = self.rev or null;
+    }).overrideAttrs (_: { requiredSystemFeatures = []; });
     checks.x86_64-linux.boot-ssh-comin = import ./tests/boot-ssh-comin.nix {
       pkgs = common.inputs.nixpkgs.legacyPackages.x86_64-linux;
       comin = common.inputs.comin;
