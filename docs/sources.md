@@ -11,3 +11,5 @@ Reviewed 2026-10-25.
 - [Prometheus storage](https://prometheus.io/docs/prometheus/latest/storage/): retention and disk considerations.
 
 No provider account, free entitlement, actual hostname, DNS change, boot result or security-rule change is implied by these references.
+
+Runtime secrets: [systemd LoadCredential](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#LoadCredential=ID:PATH) and [Grafana file provider](https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#file-provider). Source files stay on the host, outside Git and the Nix store.

@@ -7,7 +7,7 @@ let cfg = config.lab; in {
     publicInterface = lib.mkOption { type = lib.types.str; default = "eth0"; };
     publicIPv6Addresses = lib.mkOption { type = lib.types.listOf lib.types.str; default = []; };
     overlayIPv6 = lib.mkOption { type = lib.types.str; };
-    wireguardConfigFile = lib.mkOption { type = lib.types.str; default = "/run/secrets/wg0.conf"; };
+    wireguardConfigFile = lib.mkOption { type = lib.types.str; default = "/var/lib/fleet-secrets/wg0.conf"; };
     repoURL = lib.mkOption { type = lib.types.str; default = "https://github.com/r33drichards/nixos-telemetry-fleet.git"; };
   };
   config = {
@@ -32,8 +32,14 @@ let cfg = config.lab; in {
       networkConfig = { DHCP = "ipv4"; IPv6AcceptRA = true; };
       address = cfg.publicIPv6Addresses;
     };
+    # Only the directory is created declaratively; secret contents arrive out of band.
+    systemd.tmpfiles.rules = lib.mkIf cfg.enable [ "d /var/lib/fleet-secrets 0700 root root -" ];
+    systemd.services.wg-quick-wg0 = lib.mkIf cfg.enable {
+      unitConfig.RequiresMountsFor = [ cfg.wireguardConfigFile ];
+      serviceConfig.LoadCredential = [ "wg0.conf:${cfg.wireguardConfigFile}" ];
+    };
     networking.wg-quick.interfaces.wg0 = lib.mkIf cfg.enable {
-      configFile = cfg.wireguardConfigFile;
+      configFile = "/run/credentials/wg-quick-wg0.service/wg0.conf";
       autostart = true;
     };
     networking.firewall.interfaces = lib.mkIf cfg.enable {

@@ -13,11 +13,6 @@ let
   n1 = enable "node1" {};
   n2 = enable "node2" {};
   n3 = enable "node3" {};
-  web = enable "node2" ({ lib, ... }: {
-    lab.publicGrafana = lib.mkForce true;
-    lab.grafanaHostname = lib.mkForce "grafana.example.invalid";
-    lab.acmeEmail = lib.mkForce "operator@example.invalid";
-  });
   blocked = (fleet.nixosConfigurations.node1.extendModules {
     modules = [ ({ lib, ... }: { lab.enable = lib.mkForce true; }) ];
   }).config;
@@ -32,15 +27,13 @@ assert !n2.services.grafana.settings."auth.anonymous".enabled;
 assert !n2.services.caddy.enable;
 assert (builtins.head n2.services.comin.remotes).branches.testing.name == "";
 assert (builtins.head n2.services.comin.remotes).branches.main.operation == "switch";
+assert n1.systemd.services.wg-quick-wg0.serviceConfig.LoadCredential == [ "wg0.conf:/var/lib/fleet-secrets/wg0.conf" ];
 assert builtins.length n2.systemd.services.grafana.serviceConfig.LoadCredential == 2;
-assert web.services.caddy.enable;
-assert web.services.grafana.settings.security.cookie_secure;
-assert lib.all (port: !(builtins.elem port web.networking.firewall.allowedTCPPorts)) [ 3000 9090 9100 4317 4318 ];
+assert lib.all (port: !(builtins.elem port n2.networking.firewall.allowedTCPPorts)) [ 80 443 3000 9090 9100 4317 4318 ];
 {
   node1 = n1.system.build.toplevel.drvPath;
   node2 = n2.system.build.toplevel.drvPath;
   node3 = n3.system.build.toplevel.drvPath;
-  publicHTTPS = web.system.build.toplevel.drvPath;
   leafConfigurations = builtins.listToAttrs (map (name: { inherit name; value = (builtins.getFlake (root + "?dir=nodes/" + name)).nixosConfigurations.${name}.config.system.build.toplevel.drvPath; }) [ "node1" "node2" "node3" ]);
   versions = {
     grafana = n2.services.grafana.package.version;

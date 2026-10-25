@@ -4,7 +4,4 @@
   lab.hardwareApproved = false;
   lab.networkApproved = false;
   lab.telemetryCapacityApproved = false;
-  lab.publicGrafana = false;
-  lab.grafanaHostname = "";
-  lab.acmeEmail = "";
 }

@@ -12,3 +12,8 @@ result*
 *.key
 kubeconfig*
 __pycache__/
+
+# Secret payloads are prohibited even when encrypted
+secrets/
+*.sops.*
+*.age

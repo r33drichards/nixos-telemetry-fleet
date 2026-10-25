@@ -1,5 +1,11 @@
 # Validation record
 
+## Current host-local secret revision
+
+Public Grafana configuration was removed; access is deferred. Secret source defaults now use durable `/var/lib/fleet-secrets` files, loaded through systemd credentials for WireGuard and Grafana. Four structural tests and whitespace checks pass. Nix 2.30.2 parses all changed Nix files successfully. Full evaluation of this revision is BLOCKED: the container proxy rejected cache.nixos.org with HTTP 403 and the uncached GitHub source failed certificate verification. Available local source excerpts are incomplete and cannot replace the pinned inputs. Earlier evaluation results below apply only to the earlier snapshot; rerun `make eval profile-check` when the pinned inputs are accessible. No real credentials were created and no host was activated.
+
+## Earlier published snapshot
+
 Cloud workspace, 2026-10-25. No machine, network, account, credential, DNS record or cloud resource was created or modified.
 
 - PASS: root fleet flake and each of the three standalone node flakes evaluated with Nix 2.30.2, using generated lockfiles. The three configurations cover x86_64 and aarch64.
