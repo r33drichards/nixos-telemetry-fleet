@@ -58,7 +58,7 @@ pkgs.testers.runNixOSTest {
     client.fail(ssh + "root@fd00:1::1 true")
     client.fail(ssh.replace('/root/test-key', '/root/wrong-key') + "operator@fd00:1::1 true")
     effective = server.succeed("sshd -T -f /etc/ssh/sshd_config")
-    auth = dict(line.split(None, 1) for line in effective.splitlines() if len(line.split(None, 1)) == 2)
+    auth = {key.lower(): value for key, value in (line.split(None, 1) for line in effective.splitlines() if len(line.split(None, 1)) == 2)}
     print({key: auth.get(key) for key in ["passwordauthentication", "kbdinteractiveauthentication"]})
     assert auth.get("passwordauthentication") == "no", "Password authentication must be disabled"
     assert auth.get("kbdinteractiveauthentication") == "no", "Keyboard-interactive authentication must be disabled"
