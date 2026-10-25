@@ -4,7 +4,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [oidc-check, image-transport, plan, apply, e2e]
+        options: [oidc-check, image-transport, image-import, plan, apply, e2e]
         required: true
       oidc_environment:
         description: Identity to verify (oidc-check only)
@@ -13,6 +13,9 @@ on:
         default: fleet-plan
       approved_image_transport_plan_sha256:
         description: Exact privately reviewed image transport plan hash (image-transport only)
+        type: string
+      approved_image_import_plan_sha256:
+        description: Exact privately reviewed import payload and artifact checksums (image-import only)
         type: string
       plan_run_id:
         description: Prior plan run ID (apply only)
@@ -191,3 +194,58 @@ jobs:
       - name: Remove local private plan
         if: always()
         run: rm -f "$RUNNER_TEMP/fleet-image-transport.json"
+
+  image-import:
+    if: github.ref == 'refs/heads/main' && inputs.operation == 'image-import'
+    environment: fleet-apply
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [node2, node3]
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE_IMPORT_ENABLED: ${{ vars.IMAGE_IMPORT_ENABLED }}
+      APPROVED_IMAGE_IMPORT_PLAN_SHA256: ${{ inputs.approved_image_import_plan_sha256 }}
+      PRIVATE_IMAGE_IMPORT_PLAN: ${{ secrets.IMAGE_IMPORT_PLAN_JSON }}
+      OIDC_CHECK_ENABLED: ${{ vars.OIDC_CHECK_ENABLED }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      FLEET_RESOURCE_GROUP: ${{ vars.FLEET_RESOURCE_GROUP }}
+      IMPORT_NODE: ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Validate private import plan before login
+        run: |
+          umask 077
+          python3 - <<'PYCODE'
+          import os, pathlib
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'fleet-image-import.json').write_text(os.environ['PRIVATE_IMAGE_IMPORT_PLAN'])
+          PYCODE
+          python3 scripts/import-image.py "$RUNNER_TEMP/fleet-image-import.json" --node "$IMPORT_NODE"
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+      - name: Install AzCopy from pinned Nixpkgs
+        run: |
+          nix build --out-link azcopy-tool github:NixOS/nixpkgs/da6dc0e7b26060f2f71ce3ef7088fb56ee44fa36#azure-storage-azcopy
+          ./azcopy-tool/bin/azure-storage-azcopy --version
+          echo "$PWD/azcopy-tool/bin" >> "$GITHUB_PATH"
+      - uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac
+        with:
+          audience: api://AzureADTokenExchange
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Import approved artifacts and clean verified staging only
+        run: |
+          python3 scripts/azure-oidc-check.py
+          python3 scripts/import-image.py "$RUNNER_TEMP/fleet-image-import.json" --node "$IMPORT_NODE" --execute
+      - name: Remove local private plan
+        if: always()
+        run: rm -f "$RUNNER_TEMP/fleet-image-import.json"

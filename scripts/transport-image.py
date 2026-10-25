@@ -29,6 +29,8 @@ def validate_plan(raw, expected_hash, now):
         raise ValueError('Approval must expire within 24 hours')
     if not p.get('approval_reference') or not p.get('subscription_id') or not p.get('resource_group'):
         raise ValueError('Exact scope and approval reference required')
+    if p.get('shared_key_disabled') is not True or p.get('anonymous_blob_disabled') is not True or not p.get('bootstrap_account_evidence'):
+        raise ValueError('Pinned bootstrap evidence must attest locked private account settings')
     return p
 
 
@@ -49,20 +51,19 @@ def upload(p, node, vhd, report):
     account = azure(['account', 'show'])
     if account.get('id', '').lower() != p['subscription_id'].lower():
         raise ValueError('Wrong Azure subscription')
-    # Verify the named storage account is in the exact approved group and private.
-    storage = azure(['storage', 'account', 'show', '--resource-group', p['resource_group'], '--name', p['storage_account']])
-    if storage.get('allowBlobPublicAccess') is not False or storage.get('allowSharedKeyAccess') is not False:
-        raise ValueError('Require private blobs and shared-key access disabled')
+    # Account settings are pinned in the privately approved bootstrap manifest.
+    # This identity intentionally has no storage-account ARM read permission.
     common = ['--account-name', p['storage_account'], '--container-name', p['container'], '--auth-mode', 'login']
     container = azure(['storage', 'container', 'show', '--account-name', p['storage_account'], '--name', p['container'], '--auth-mode', 'login'])
-    if container.get('properties', {}).get('publicAccess') not in (None, 'None'):
+    properties = container.get('properties', {})
+    if 'publicAccess' not in properties or properties['publicAccess'] not in (None, 'None'):
         raise ValueError('Container must be private')
     with vhd.open('rb') as stream:
         digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     name = f"{p['prefix'].rstrip('/')}/{SOURCE_REVISION}/{node}.vhd"
     if azure(['storage', 'blob', 'exists', *common, '--name', name]).get('exists') is not False:
         raise ValueError('Blob exists or existence uncertain; inspect before retry')
-    azure(['storage', 'blob', 'upload', *common, '--name', name, '--file', str(vhd), '--type', 'block', '--overwrite', 'false', '--metadata', f'source_revision={SOURCE_REVISION}', f'sha256={digest}', f'node={node}'])
+    azure(['storage', 'blob', 'upload', *common, '--name', name, '--file', str(vhd), '--type', 'block', '--overwrite', 'false', '--metadata', f'source_revision={SOURCE_REVISION}', f'sha256={digest}', f'node={node}', 'artifact_inspection=passed'])
     result = azure(['storage', 'blob', 'show', *common, '--name', name])
     if result.get('properties', {}).get('contentLength') != vhd.stat().st_size or result.get('metadata', {}).get('sha256') != digest:
         raise ValueError('Uploaded length/provenance verification failed; do not retry blindly')

@@ -30,7 +30,7 @@ def prepare(config, reports):
         raise ValueError('Ancillary estimate must fit the approved $3 monthly ceiling')
     for key in ['cost_evidence', 'phase_b_scope_approval']:
         if not isinstance(config.get(key), str) or not config[key].strip():
-            raise ValueError('Exact import cost and temporary permission evidence is required')
+            raise ValueError('Exact import cost and persistent narrow permission evidence is required')
     nodes = []
     prefix = f"/subscriptions/{config['subscription_id']}/resourceGroups/{config['resource_group']}"
     for name, (system, arch) in ARCHITECTURES.items():

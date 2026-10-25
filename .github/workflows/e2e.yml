@@ -24,6 +24,8 @@ jobs:
             system-features = nixos-test benchmark big-parallel kvm
       - name: Require VM acceleration
         run: test -r /dev/kvm && test -w /dev/kvm
+      - name: Verify pinned image transfer tool without cloud access
+        run: nix shell github:NixOS/nixpkgs/da6dc0e7b26060f2f71ce3ef7088fb56ee44fa36#azure-storage-azcopy -c azure-storage-azcopy --version
       - name: Evaluate fleet and enabled profiles
         run: make eval profile-check
       - name: Boot NixOS and verify SSH, Comin update and reboot
