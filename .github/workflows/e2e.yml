@@ -24,5 +24,7 @@ jobs:
             system-features = nixos-test benchmark big-parallel kvm
       - name: Require VM acceleration
         run: test -r /dev/kvm && test -w /dev/kvm
+      - name: Evaluate fleet and enabled profiles
+        run: make eval profile-check
       - name: Boot real NixOS guests and verify private Wasm HTTP
         run: nix build -L .#checks.x86_64-linux.boot-overlay-wasm

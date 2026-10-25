@@ -47,7 +47,7 @@ in {
       requires = [ "wg-quick-wg0.service" ];
       after = [ "wg-quick-wg0.service" ];
       serviceConfig = {
-        ExecStart = "${spin}/bin/spin up --listen [${config.lab.overlayIPv6}]:8080 --from ${app}/spin.toml";
+        ExecStart = "${spin}/bin/spin up --state-dir /var/lib/wasm-http/state --listen [${config.lab.overlayIPv6}]:8080 --from ${app}/spin.toml";
         DynamicUser = true;
         StateDirectory = "wasm-http";
         WorkingDirectory = "/var/lib/wasm-http";

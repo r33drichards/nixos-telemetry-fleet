@@ -2,7 +2,7 @@
 
 ## Terraform and Wasm E2E development
 
-Initial Actions run 40228914573 at commit `87361e05616d09c31afd33b79ab7db76c5adf00f` failed because `common/modules/wasm.nix` was absent. This establishes the red test before implementation. Terraform root/module validation and all three mock-provider tests pass locally; Actions Terraform run 40229114257 also passed. The real VM E2E implementation is being qualified in PR #1; do not infer a pass until the exact final head's run completes.
+Initial Actions run 40228914573 at commit `87361e05616d09c31afd33b79ab7db76c5adf00f` failed because `common/modules/wasm.nix` was absent. This establishes the red test before implementation. Terraform root/module validation and all three mock-provider tests pass locally; Actions Terraform run 40229114257 also passed. The next VM run booted NixOS and started WireGuard, then exposed Spin attempting to write state inside the read-only Nix store. The module now explicitly uses `/var/lib/wasm-http/state`. The real VM E2E implementation is being qualified in PR #1; do not infer a pass until the exact final head's run completes.
 
 The cached Spin archive, extracted executable and upstream Wasm component were hash-verified and a fresh local loopback HTTP smoke test returned 200 and the exact `hello from wasm` body. This does not establish NixOS boot or cloud networking. Missing cloud inventory fails the live E2E script rather than skipping.
 
