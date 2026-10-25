@@ -36,7 +36,7 @@ in pkgs.testers.runNixOSTest {
     server.succeed("systemctl restart wasm-http")
     server.wait_for_unit("wasm-http.service")
     client.wait_until_succeeds("curl -g --noproxy '*' --max-time 5 -fsS 'http://[fd42:6e69:7800::1]:8080/' | grep -qx 'hello from wasm'", timeout=180)
-    client.succeed("curl -g --noproxy '*' --max-time 5 -fsS 'http://[fd42:6e69:7800::1]:9100/metrics' | grep -q node_uname_info")
+    client.succeed("curl -g --noproxy '*' --max-time 5 -fsS 'http://[fd42:6e69:7800::1]:9100/metrics' | grep '^node_uname_info{' > /dev/null")
     client.fail("curl -g --noproxy '*' --connect-timeout 3 -fsS 'http://[fd00:1::1]:8080/'")
     server.succeed("test $(stat -c %a /var/lib/fleet-secrets/wg0.conf) = 600")
     server.shutdown()

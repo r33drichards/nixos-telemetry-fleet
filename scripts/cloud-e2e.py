@@ -31,7 +31,7 @@ for node in nodes:
     assert version["configurationRevision"] == expected_revision, "Host configuration revision does not match approved workflow head"
     run(node, "grep -q '^ID=nixos' /etc/os-release && systemctl is-active wg-quick-wg0 comin prometheus-node-exporter")
     for peer in nodes:
-        run(node, "curl -g --noproxy '*' --max-time 15 -fsS 'http://[%s]:9100/metrics' | grep -q node_uname_info" % peer['overlay'])
+        run(node, "curl -g --noproxy '*' --max-time 15 -fsS 'http://[%s]:9100/metrics' | grep '^node_uname_info{' > /dev/null" % peer['overlay'])
         if peer.get('wasm'):
             run(peer, 'systemctl is-active wasm-http')
             body = run(node, "curl -g --noproxy '*' --max-time 15 -fsS 'http://[%s]:8080/'" % peer['overlay'])
