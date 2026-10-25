@@ -10,6 +10,8 @@ pkgs.testers.runNixOSTest {
     services.comin.repositorySubdir = lib.mkForce ".";
     services.comin.remotes = lib.mkForce [{ name = "origin"; url = "file:///var/lib/comin-test-repo"; branches.main = { name = "main"; operation = "switch"; }; branches.testing.name = ""; poller.period = 5; }];
     environment.systemPackages = [ pkgs.git pkgs.openssh ];
+    # Offline fixture: all build inputs are supplied by the test closure.
+    nix.settings.substituters = lib.mkForce [];
     environment.etc."fleet-generation".text = lib.mkDefault "initial";
     specialisation.updated.configuration.environment.etc."fleet-generation".text = lib.mkForce "updated";
     boot.loader.systemd-boot.enable = true;
@@ -53,7 +55,7 @@ pkgs.testers.runNixOSTest {
     server.succeed("install -d -m 755 /var/lib/fleet-access; printf '%s\\n' '" + pub + "' > /var/lib/fleet-access/authorized_keys; chmod 644 /var/lib/fleet-access/authorized_keys")
     hostkey = server.succeed("cat /etc/ssh/ssh_host_ed25519_key.pub").strip()
     client.succeed("printf '%s\\n' 'fd00:1::1 " + hostkey + "' > /root/known_hosts")
-    ssh = "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/known_hosts -o ConnectTimeout=5 -i /root/test-key "
+    ssh = "ssh -6 -b fd00:1::2 -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/known_hosts -o ConnectTimeout=5 -i /root/test-key "
     client.wait_until_succeeds(ssh + "operator@fd00:1::1 'id -un' | grep -qx operator", timeout=60)
     client.fail(ssh + "root@fd00:1::1 true")
     client.fail(ssh.replace('/root/test-key', '/root/wrong-key') + "operator@fd00:1::1 true")
@@ -65,7 +67,7 @@ pkgs.testers.runNixOSTest {
     client.succeed("ip -6 addr add fd00:1::99/64 dev eth1")
     # Prove DAD has finished and this exact source can route to the server.
     client.wait_until_succeeds("ping -6 -c 1 -W 2 -I fd00:1::99 fd00:1::1", timeout=30)
-    status, output = client.execute(ssh + "-b fd00:1::99 operator@fd00:1::1 true 2>&1")
+    status, output = client.execute(ssh.replace("-b fd00:1::2", "-b fd00:1::99") + "operator@fd00:1::1 true 2>&1")
     assert status != 0 and "timed out" in output.lower(), "Usable unapproved source must time out at SSH ingress, not fail local binding"
     unwanted = ["wasm-http", "grafana", "prometheus", "prometheus-node-exporter", "k3s", "wg-quick-wg0"]
     for unit in unwanted:
