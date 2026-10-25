@@ -10,7 +10,7 @@ in {
     grafanaPasswordFile = lib.mkOption { type = lib.types.str; default = "/var/lib/fleet-secrets/grafana-admin-password"; };
     scrapeTargets = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ "[fd42:6e69:7800::1]:9100" "[fd42:6e69:7800::2]:9100" "[fd42:6e69:7800::3]:9100" ];
+      default = [ "[fd42:6e69:7800::2]:9100" "[fd42:6e69:7800::3]:9100" ];
     };
   };
   config = {

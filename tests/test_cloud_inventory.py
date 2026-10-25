@@ -22,10 +22,13 @@ class CloudInventory(unittest.TestCase):
         self.assertIn(expected, result.stderr)
 
     def nodes(self):
-        return [{'ssh': f'operator@node{i}', 'overlay': f'fd42::{i}', 'wasm': i == 1} for i in range(1, 4)]
+        return [{'ssh': f'operator@node{i}', 'overlay': f'fd42::{i}', 'wasm': i == 1} for i in range(1, 3)]
 
-    def test_requires_three_hosts(self):
-        self.run_invalid(self.nodes()[:2], 'Exactly three actual hosts required')
+    def test_requires_two_hosts(self):
+        self.run_invalid(self.nodes()[:1], 'Exactly two actual hosts required')
+
+    def test_rejects_old_three_host_inventory(self):
+        self.run_invalid(self.nodes() + [{'ssh': 'operator@node3', 'overlay': 'fd42::3'}], 'Exactly two actual hosts required')
 
     def test_rejects_scoped_address(self):
         nodes = self.nodes()

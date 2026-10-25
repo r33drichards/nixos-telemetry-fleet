@@ -50,15 +50,17 @@ def validate(node, skus):
 
 
 def main():
-    if len(sys.argv) == 3 and sys.argv[1] == '--plan-json':
+    if len(sys.argv) == 2 and sys.argv[1] == '--plan-json':
         plan = json.loads(pathlib.Path(sys.argv[2]).read_text())
         topology = {k: v['value'] for k, v in plan['variables'].items()}
     elif len(sys.argv) == 2:
         topology = json.loads(pathlib.Path(sys.argv[1]).read_text())
     else:
         raise ValueError('Private topology or saved plan JSON required')
-    if topology.get('enabled') is not True or len(topology.get('nodes', {})) != 3:
-        raise ValueError('Live preflight requires the approved three-host topology')
+    if topology.get('enabled') is not True or len(topology.get('nodes', {})) != 2:
+        raise ValueError('Live preflight requires the approved two-host topology')
+    if len({n['size'].lower() for n in topology['nodes'].values()}) != 2:
+        raise ValueError('Continuous free fleet requires distinct SKU meters')
     for node in topology['nodes'].values():
         if node.get('sku_available') is not True or node.get('trusted_launch_supported') is not True:
             raise ValueError('Missing explicit SKU/security qualification')

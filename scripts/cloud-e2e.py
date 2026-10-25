@@ -10,10 +10,10 @@ inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
 expected_revision = os.environ['GITHUB_SHA']
 assert re.fullmatch(r'[a-f0-9]{40}', expected_revision), 'Expected source revision required'
 nodes = inventory['nodes']
-assert len(nodes) == 3, 'Exactly three actual hosts required'
-assert len({n['ssh'] for n in nodes}) == 3, 'Hosts must be distinct'
+assert len(nodes) == 2, 'Exactly two actual hosts required'
+assert len({n['ssh'] for n in nodes}) == 2, 'Hosts must be distinct'
 assert any(n.get('wasm') for n in nodes), 'An actual Wasm host is required'
-assert len({n['overlay'] for n in nodes}) == 3, 'Overlay addresses must be distinct'
+assert len({n['overlay'] for n in nodes}) == 2, 'Overlay addresses must be distinct'
 for node in nodes:
     assert re.fullmatch(r'operator@[A-Za-z0-9.:\[\]-]+', node['ssh']), 'Invalid SSH destination'
     assert re.fullmatch(r'[0-9a-fA-F:]+', node['overlay']), 'Unscoped IPv6 address required'
@@ -42,4 +42,4 @@ for node in nodes:
             run(peer, 'systemctl is-active wasm-http')
             body = run(node, "curl -g --noproxy '*' --max-time 15 -fsS 'http://[%s]:8080/'" % peer['overlay'])
             assert body == b'hello from wasm\n', 'Actual Wasm response mismatch'
-print('PASS: three NixOS hosts, active Comin/WireGuard, cross-node metrics and actual Wasm HTTP')
+print('PASS: two NixOS hosts, active Comin/WireGuard, cross-node metrics and actual Wasm HTTP')

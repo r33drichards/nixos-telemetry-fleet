@@ -12,6 +12,10 @@ variable "nodes" {
   type        = map(object({ location = string, resource_group_name = string, size = string, source_image_id = string, network_interface_id = string, ssh_public_key = string, architecture = string, disk_gib = number, disk_type = string, zone = optional(string), sku_available = optional(bool, false), trusted_launch_supported = optional(bool, false) }))
   default     = {}
   validation {
+    condition     = length(distinct([for n in values(var.nodes) : lower(n.size)])) == length(var.nodes)
+    error_message = "The continuous strict-free fleet requires distinct SKU meters. Two identical SKUs share one monthly allowance; credits are not coverage."
+  }
+  validation {
     condition     = alltrue([for n in values(var.nodes) : n.sku_available && n.trusted_launch_supported])
     error_message = "Every selected SKU/region/zone must be available and explicitly support Trusted Launch. Unknown/unsupported capabilities are blocked; Secure Boot and vTPM are not disabled."
   }

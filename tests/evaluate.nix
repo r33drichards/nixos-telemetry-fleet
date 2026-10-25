@@ -21,6 +21,7 @@ assert lib.all (n: !n.config.services.comin.enable && !n.config.services.prometh
 assert lib.any (a: !a.assertion) blocked.assertions;
 assert n1.services.prometheus.exporters.node.listenAddress == "[fd42:6e69:7800::1]";
 assert fleet.nixosConfigurations.node3.pkgs.stdenv.hostPlatform.system == "aarch64-linux";
+assert n2.lab.scrapeTargets == [ "[fd42:6e69:7800::2]:9100" "[fd42:6e69:7800::3]:9100" ];
 assert n2.services.prometheus.listenAddress == "127.0.0.1";
 assert n2.services.grafana.settings.server.http_addr == "127.0.0.1";
 assert !n2.services.grafana.settings."auth.anonymous".enabled;

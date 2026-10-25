@@ -1,5 +1,5 @@
 {
-  description = "Three minimal NixOS nodes: IPv6, WireGuard, Comin and private node metrics";
+  description = "Two-node Azure fleet with retained inactive node1 template: IPv6, WireGuard, Comin and private node metrics";
   inputs.common.url = "path:./common";
   outputs = { self, common }: {
     checks.x86_64-linux.boot-overlay-wasm = import ./tests/boot-overlay-wasm.nix {

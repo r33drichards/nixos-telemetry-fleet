@@ -2,8 +2,8 @@ resource "terraform_data" "approval" {
   count = var.enabled ? 1 : 0
   lifecycle {
     precondition {
-      condition     = var.approval.free_entitlement_verified && var.approval.image_boot_verified && var.approval.network_access_approved && var.approval.monthly_cost_usd == 0 && length(var.approval.evidence_reference) > 0 && length(var.nodes) == 3
-      error_message = "Three approved hosts, strictly-free entitlement, tested image/Secure Boot and network/access evidence are required. Credits do not count as free entitlement."
+      condition     = var.approval.free_entitlement_verified && var.approval.image_boot_verified && var.approval.network_access_approved && var.approval.monthly_cost_usd == 0 && length(var.approval.evidence_reference) > 0 && length(var.nodes) == 2
+      error_message = "Two approved hosts, strictly-free entitlement, tested image/Secure Boot and network/access evidence are required. Credits do not count as free entitlement."
     }
   }
 }

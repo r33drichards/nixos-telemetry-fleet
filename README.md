@@ -1,16 +1,16 @@
 # nixos-telemetry-fleet
 
-Three minimal NixOS node flakes with IPv6, WireGuard, Comin updates from `main`, and private node-exporter metrics. Node 2 collects metrics with Prometheus and provisions a Grafana dashboard. Grafana access is deferred: it remains loopback-only with no public proxy or ingress.
+Two proposed Azure NixOS hosts (`node2` AMD and `node3` ARM), with `node1` retained as an inactive template. The fleet uses IPv6, WireGuard, Comin updates from `main`, and private node-exporter metrics. Node 2 collects metrics with Prometheus and provisions a Grafana dashboard. Grafana access is deferred: it remains loopback-only with no public proxy or ingress.
 
 **Nothing is deployed.** Node services, network changes, and public ingress are disabled until hardware, access, network and telemetry-capacity approvals are recorded. No secrets belong in Git, including encrypted payloads (sops/agenix). No live IP inventory, WireGuard keys, Grafana password, cloud credentials or state is in this repository.
 
 | Flake | Architecture | Candidate role |
 |---|---|---|
-| `nodes/node1` | x86_64-linux | Node exporter; possible B1s worker |
+| `nodes/node1` | x86_64-linux | Inactive legacy x86 template; not a deployment target |
 | `nodes/node2` | x86_64-linux | Prometheus + Grafana + node exporter; possible B2ats_v2 |
 | `nodes/node3` | aarch64-linux | Node exporter; possible B2pts_v2 |
 
-These Azure assignments are candidates, not capacity reservations or verified free entitlements. Change `system` in both the leaf flake and root fleet entrypoint if the approved placement differs. The three node flakes share `common/`; clone the whole repository, not a single subdirectory.
+Azure is the only selected provider; GCP and Oracle are excluded. These assignments are candidates, not capacity reservations or verified free entitlements. Change `system` in both the leaf flake and root fleet entrypoint if the approved placement differs. The three node flakes share `common/`; clone the whole repository, not a single subdirectory.
 
 ## Local validation
 
@@ -37,7 +37,7 @@ Builds can download packages and use substantial local RAM/disk. No `nixos-rebui
 
 Grafana anonymous access and signup are disabled. Grafana/Prometheus are loopback-only; exporters listen only on their WireGuard IPv6 addresses. Public Grafana access, DNS and TLS are deferred. Exporter, Prometheus and Grafana backend ports are not opened publicly. WireGuard peer possession is the access boundary for metrics.
 
-The dashboard **Three NixOS nodes** shows exporter health, CPU, available memory and root filesystem space. Its instance selector discovers all three scrape targets. Prometheus scrapes each node every 60 seconds and keeps at most 24 hours/256 MB of samples, whichever limit applies first; WAL and other data can exceed the retention-size setting.
+The dashboard **NixOS fleet nodes** shows exporter health, CPU, available memory and root filesystem space. Its instance selector discovers the two selected scrape targets. Prometheus scrapes each node every 60 seconds and keeps at most 24 hours/256 MB of samples, whichever limit applies first; WAL and other data can exceed the retention-size setting.
 
 ## Updates and resource limits
 
@@ -47,7 +47,7 @@ Five successful boot generations are retained. This provides manual rollback, **
 
 Grafana and Prometheus each have a 256 MiB hard limit and 160 MiB soft limit; node-exporter has a 48 MiB hard limit. Comin's evaluation/build budget is capped at 512 MiB. Limits can kill workloads and do not prove the combined system fits 1 GiB. Sustained ingestion, compaction, dashboard queries and concurrent Nix evaluation still need testing on the selected host. Metrics-only replaces full LGTM by agreement; Loki, Tempo and Pyroscope are not included.
 
-The previous Kubernetes/Knative/Wasm prototype is preserved on local branch `archive/knative-prototype`; it is outside the current deliverable. Terraform host modules, protected manual cloud workflows, and a real NixOS/Wasm VM E2E are now under development; see [orchestration and approval bundle](docs/orchestration.md). Public repository: [r33drichards/nixos-telemetry-fleet](https://github.com/r33drichards/nixos-telemetry-fleet). Pi created the repository through the authorized #wchat workflow.
+Kubernetes and Knative are not requirements or acceptance blockers. The previous Kubernetes/Knative/Wasm prototype is preserved on local branch `archive/knative-prototype`; it is outside the current deliverable. Terraform host modules, protected manual cloud workflows, and a real NixOS/Wasm VM E2E are now under development; see [orchestration and approval bundle](docs/orchestration.md). Public repository: [r33drichards/nixos-telemetry-fleet](https://github.com/r33drichards/nixos-telemetry-fleet). Pi created the repository through the authorized #wchat workflow.
 
 ## Host orchestration and Wasm qualification
 

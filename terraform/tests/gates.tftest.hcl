@@ -27,3 +27,11 @@ run "unavailable_sku_rejected" {
   }
   expect_failures = [var.nodes]
 }
+
+run "duplicate_compute_meter_rejected" {
+  command = plan
+  variables {
+    nodes = { for name in ["node2", "node3"] : name => { location = "example", resource_group_name = "example", size = "Standard_B2ats_v2", source_image_id = "example", network_interface_id = "example", ssh_public_key = "example", architecture = "x86_64", disk_gib = 64, disk_type = "Premium_LRS", sku_available = true, trusted_launch_supported = true } }
+  }
+  expect_failures = [var.nodes]
+}
