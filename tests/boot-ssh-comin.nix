@@ -57,7 +57,11 @@ pkgs.testers.runNixOSTest {
     client.wait_until_succeeds(ssh + "operator@fd00:1::1 'id -un' | grep -qx operator", timeout=60)
     client.fail(ssh + "root@fd00:1::1 true")
     client.fail(ssh.replace('/root/test-key', '/root/wrong-key') + "operator@fd00:1::1 true")
-    server.succeed("sshd -T -f /etc/ssh/sshd_config > /tmp/effective-sshd; grep -qx 'passwordauthentication no' /tmp/effective-sshd && grep -qx 'kbdinteractiveauthentication no' /tmp/effective-sshd")
+    effective = server.succeed("sshd -T -f /etc/ssh/sshd_config")
+    auth = dict(line.split(None, 1) for line in effective.splitlines() if len(line.split(None, 1)) == 2)
+    print({key: auth.get(key) for key in ["passwordauthentication", "kbdinteractiveauthentication"]})
+    assert auth.get("passwordauthentication") == "no", "Password authentication must be disabled"
+    assert auth.get("kbdinteractiveauthentication") == "no", "Keyboard-interactive authentication must be disabled"
     client.succeed("ip -6 addr add fd00:1::99/64 dev eth1")
     client.fail(ssh + "-b fd00:1::99 operator@fd00:1::1 true")
     unwanted = ["wasm-http", "grafana", "prometheus", "prometheus-node-exporter", "k3s", "wg-quick-wg0"]
