@@ -1,6 +1,14 @@
 # Validation record
 
-## Current host-local secret revision
+## Terraform and Wasm E2E development
+
+Initial Actions run 40228914573 at commit `87361e05616d09c31afd33b79ab7db76c5adf00f` failed because `common/modules/wasm.nix` was absent. This establishes the red test before implementation. Terraform root/module validation and all three mock-provider tests pass locally; Actions Terraform run 40229114257 also passed. The real VM E2E implementation is being qualified in PR #1; do not infer a pass until the exact final head's run completes.
+
+The cached Spin archive, extracted executable and upstream Wasm component were hash-verified and a fresh local loopback HTTP smoke test returned 200 and the exact `hello from wasm` body. This does not establish NixOS boot or cloud networking. Missing cloud inventory fails the live E2E script rather than skipping.
+
+The cloud workspace lacks `/dev/kvm` and QEMU. Its cache.nixos.org request is denied by the proxy with HTTP 403 even on the host. GitHub HTTPS works with the host trust store, while the disposable Nix container reported an untrusted certificate chain despite readable CA files. These are separate network-policy and container-trust problems; certificate verification was never disabled, proxy routing was not bypassed, and no CA trust changes were made. The authorized GitHub runner successfully downloaded pinned inputs and has KVM, so VM qualification runs there.
+
+## Earlier host-local secret revision
 
 Public Grafana configuration was removed; access is deferred. Secret source defaults now use durable `/var/lib/fleet-secrets` files, loaded through systemd credentials for WireGuard and Grafana. Four structural tests and whitespace checks pass. Nix 2.30.2 parses all changed Nix files successfully. Full evaluation of this revision is BLOCKED: the container proxy rejected cache.nixos.org with HTTP 403 and the uncached GitHub source failed certificate verification. Available local source excerpts are incomplete and cannot replace the pinned inputs. Earlier evaluation results below apply only to the earlier snapshot; rerun `make eval profile-check` when the pinned inputs are accessible. No real credentials were created and no host was activated.
 

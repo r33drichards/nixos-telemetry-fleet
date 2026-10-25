@@ -47,4 +47,8 @@ Five successful boot generations are retained. This provides manual rollback, **
 
 Grafana and Prometheus each have a 256 MiB hard limit and 160 MiB soft limit; node-exporter has a 48 MiB hard limit. Comin's evaluation/build budget is capped at 512 MiB. Limits can kill workloads and do not prove the combined system fits 1 GiB. Sustained ingestion, compaction, dashboard queries and concurrent Nix evaluation still need testing on the selected host. Metrics-only replaces full LGTM by agreement; Loki, Tempo and Pyroscope are not included.
 
-The previous Kubernetes/Knative/Wasm prototype is preserved on local branch `archive/knative-prototype`; it is outside the current deliverable. No Terraform is needed for this minimal configuration stage. Public repository: [r33drichards/nixos-telemetry-fleet](https://github.com/r33drichards/nixos-telemetry-fleet). Pi created the repository through the authorized #wchat workflow.
+The previous Kubernetes/Knative/Wasm prototype is preserved on local branch `archive/knative-prototype`; it is outside the current deliverable. Terraform host modules, protected manual cloud workflows, and a real NixOS/Wasm VM E2E are now under development; see [orchestration and approval bundle](docs/orchestration.md). Public repository: [r33drichards/nixos-telemetry-fleet](https://github.com/r33drichards/nixos-telemetry-fleet). Pi created the repository through the authorized #wchat workflow.
+
+## Host orchestration and Wasm qualification
+
+Run `nix build -L .#checks.x86_64-linux.boot-overlay-wasm` on a KVM-capable Linux builder. This tests real NixOS guests and private Wasm HTTP; it does not deploy a cloud cluster. Terraform defaults to zero hosts, and the manual cloud workflow needs separately approved identity, private state storage and a reviewed saved plan. No Kubernetes, Knative or MCPJS service is enabled by this change.

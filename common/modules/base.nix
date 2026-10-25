@@ -12,10 +12,6 @@ let cfg = config.lab; in {
   };
   config = {
     system.stateVersion = "26.05";
-    # Evaluation fixture. Replace with tested hardware module before enabling.
-    boot.loader.systemd-boot.enable = lib.mkDefault true;
-    fileSystems."/" = lib.mkDefault { device = "/dev/disk/by-label/nixos"; fsType = "ext4"; };
-    fileSystems."/boot" = lib.mkDefault { device = "/dev/disk/by-label/ESP"; fsType = "vfat"; };
     networking.enableIPv6 = true;
     networking.firewall.enable = true;
     nix.settings = { experimental-features = [ "nix-command" "flakes" ]; max-jobs = 1; cores = 1; };
@@ -24,6 +20,7 @@ let cfg = config.lab; in {
       { assertion = !cfg.enable || (cfg.networkApproved && cfg.hardwareApproved); message = "Approve hardware/boot/recovery and exact network before enabling nodes."; }
       { assertion = lib.hasPrefix "/run/" cfg.wireguardConfigFile || lib.hasPrefix "/var/lib/" cfg.wireguardConfigFile; message = "WireGuard config must remain outside the Nix store."; }
     ];
+    environment.systemPackages = lib.mkIf cfg.enable [ pkgs.curl pkgs.wireguard-tools ];
     networking.useNetworkd = lib.mkIf cfg.enable true;
     networking.useDHCP = lib.mkIf cfg.enable false;
     systemd.network.enable = cfg.enable;

@@ -16,8 +16,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
         with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
           extra_nix_config: |
             system-features = nixos-test benchmark big-parallel kvm
       - name: Require VM acceleration

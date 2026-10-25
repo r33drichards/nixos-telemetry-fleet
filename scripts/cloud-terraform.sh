@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+test "${GITHUB_REF:-}" = refs/heads/main
+test "${FLEET_ENABLED:-}" = explicitly-approved
 umask 077
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
