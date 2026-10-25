@@ -63,7 +63,10 @@ pkgs.testers.runNixOSTest {
     assert auth.get("passwordauthentication") == "no", "Password authentication must be disabled"
     assert auth.get("kbdinteractiveauthentication") == "no", "Keyboard-interactive authentication must be disabled"
     client.succeed("ip -6 addr add fd00:1::99/64 dev eth1")
-    client.fail(ssh + "-b fd00:1::99 operator@fd00:1::1 true")
+    # Prove DAD has finished and this exact source can route to the server.
+    client.wait_until_succeeds("ping -6 -c 1 -W 2 -I fd00:1::99 fd00:1::1", timeout=30)
+    status, output = client.execute(ssh + "-b fd00:1::99 operator@fd00:1::1 true")
+    assert status != 0 and "timed out" in output.lower(), "Usable unapproved source must time out at SSH ingress, not fail local binding"
     unwanted = ["wasm-http", "grafana", "prometheus", "prometheus-node-exporter", "k3s", "wg-quick-wg0"]
     for unit in unwanted:
         server.fail("systemctl is-active " + unit)
