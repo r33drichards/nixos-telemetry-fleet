@@ -38,7 +38,7 @@ in pkgs.testers.runNixOSTest {
         machine.succeed("systemctl restart wg-quick-wg0 prometheus-node-exporter")
     ${pkgs.lib.optionalString qualifyTelemetry ''
     server.succeed("umask 077; head -c 32 /dev/urandom | base64 > /var/lib/fleet-secrets/grafana-admin-password; head -c 32 /dev/urandom | base64 > /var/lib/fleet-secrets/grafana-secret-key")
-    server.succeed("systemctl restart prometheus grafana")
+    server.succeed("systemctl reset-failed grafana; systemctl restart prometheus grafana")
     server.wait_for_unit("grafana.service")
     server.wait_until_succeeds("curl -fsS http://127.0.0.1:3000/api/health | jq -e '.database == \"ok\"'")
     server.wait_until_succeeds("curl -fsS 'http://127.0.0.1:9090/api/v1/query?query=count%28up%7Bjob%3D%22nodes%22%7D%3D%3D1%29' | jq -e '.data.result[0].value[1] == \"2\"'", timeout=180)
