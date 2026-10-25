@@ -8,7 +8,7 @@ check:
 profile-check:
 	nix eval --impure --json --file tests/evaluate.nix
 vm-e2e:
-	nix build -L .#checks.x86_64-linux.boot-overlay-wasm
+	nix build -L .#checks.x86_64-linux.boot-ssh-comin
 tf-check:
 	terraform -chdir=terraform fmt -check -recursive
 	terraform -chdir=terraform init -backend=false -input=false -lockfile=readonly

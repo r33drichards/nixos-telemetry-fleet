@@ -2,7 +2,7 @@
 """Actual host checks; missing inventory/access/behavior fails, never skips.
 
 Inventory is host-local JSON: {"nodes": [{"ssh": "operator@host",
-"overlay": "fd42:6e69:7800::1", "wasm": true}, ...]}.
+"name": "node2"}, ...]}.
 The runner receives /run/fleet/ssh_key and known_hosts outside Git.
 """
 import ipaddress, json, os, pathlib, re, subprocess, sys
@@ -12,12 +12,8 @@ assert re.fullmatch(r'[a-f0-9]{40}', expected_revision), 'Expected source revisi
 nodes = inventory['nodes']
 assert len(nodes) == 2, 'Exactly two actual hosts required'
 assert len({n['ssh'] for n in nodes}) == 2, 'Hosts must be distinct'
-assert any(n.get('wasm') for n in nodes), 'An actual Wasm host is required'
-assert len({n['overlay'] for n in nodes}) == 2, 'Overlay addresses must be distinct'
 for node in nodes:
     assert re.fullmatch(r'operator@[A-Za-z0-9.:\[\]-]+', node['ssh']), 'Invalid SSH destination'
-    assert re.fullmatch(r'[0-9a-fA-F:]+', node['overlay']), 'Unscoped IPv6 address required'
-    assert ipaddress.ip_address(node['overlay']) in ipaddress.ip_network('fc00::/7'), 'ULA overlay address required'
 
 def run(node, command):
     result = subprocess.run(['ssh', '-i', '/run/fleet/ssh_key', '-o', 'BatchMode=yes',
@@ -35,11 +31,6 @@ for node in nodes:
     machine_ids.add(machine_id)
     version = json.loads(run(node, "nixos-version --json"))
     assert version["configurationRevision"] == expected_revision, "Host configuration revision does not match approved workflow head"
-    run(node, "grep -q '^ID=nixos' /etc/os-release && systemctl is-active wg-quick-wg0 comin prometheus-node-exporter")
-    for peer in nodes:
-        run(node, "curl -g --noproxy '*' --max-time 15 -fsS 'http://[%s]:9100/metrics' | grep '^node_uname_info{' > /dev/null" % peer['overlay'])
-        if peer.get('wasm'):
-            run(peer, 'systemctl is-active wasm-http')
-            body = run(node, "curl -g --noproxy '*' --max-time 15 -fsS 'http://[%s]:8080/'" % peer['overlay'])
-            assert body == b'hello from wasm\n', 'Actual Wasm response mismatch'
-print('PASS: two NixOS hosts, active Comin/WireGuard, cross-node metrics and actual Wasm HTTP')
+    run(node, "grep -q '^ID=nixos' /etc/os-release && systemctl is-active comin sshd")
+    run(node, "for unit in wasm-http grafana prometheus prometheus-node-exporter k3s wg-quick-wg0; do if systemctl is-active --quiet $unit; then exit 1; fi; done")
+print('PASS: two distinct NixOS hosts at approved revision, authenticated SSH, active Comin and no unwanted services')

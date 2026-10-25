@@ -30,16 +30,6 @@ class CloudInventory(unittest.TestCase):
     def test_rejects_old_three_host_inventory(self):
         self.run_invalid(self.nodes() + [{'ssh': 'operator@node3', 'overlay': 'fd42::3'}], 'Exactly two actual hosts required')
 
-    def test_rejects_scoped_address(self):
-        nodes = self.nodes()
-        nodes[0]['overlay'] += '%untrusted-scope'
-        self.run_invalid(nodes, 'Unscoped IPv6 address required')
-
-    def test_rejects_duplicate_overlay(self):
-        nodes = self.nodes()
-        nodes[1]['overlay'] = nodes[0]['overlay']
-        self.run_invalid(nodes, 'Overlay addresses must be distinct')
-
     def test_rejects_shell_metacharacters(self):
         nodes = self.nodes()
         nodes[0]['ssh'] = 'operator@host;exit'

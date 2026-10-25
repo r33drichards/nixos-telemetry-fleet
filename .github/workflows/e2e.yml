@@ -9,13 +9,9 @@ concurrency:
   group: vm-e2e-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  boot-overlay-wasm:
+  boot-ssh-comin:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [boot-overlay-wasm, boot-overlay-wasm-1gib]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -30,5 +26,5 @@ jobs:
         run: test -r /dev/kvm && test -w /dev/kvm
       - name: Evaluate fleet and enabled profiles
         run: make eval profile-check
-      - name: Boot real NixOS guests and verify private Wasm HTTP
-        run: nix build -L .#checks.x86_64-linux.${{ matrix.target }}
+      - name: Boot NixOS and verify SSH, Comin update and reboot
+        run: nix build -L .#checks.x86_64-linux.boot-ssh-comin

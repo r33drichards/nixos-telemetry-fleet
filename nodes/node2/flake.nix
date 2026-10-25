@@ -8,7 +8,7 @@
       name = "node2";
       extraModules = [ ./deployment.nix ];
       address = "fd42:6e69:7800::2";
-      telemetry = true;
+      telemetry = false;
     };
   };
 }

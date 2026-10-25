@@ -4,7 +4,7 @@ let
     imports = [ comin.nixosModules.comin ../common/modules/base.nix ../common/modules/telemetry.nix ../common/modules/wasm.nix ];
     networking.hostName = name;
     boot.loader.systemd-boot.enable = lib.mkForce false;
-    lab = { enable = true; hardwareApproved = true; networkApproved = true; overlayIPv6 = address; publicInterface = "eth1"; };
+    lab = { enable = true; wireguard = true; nodeExporter = true; sshSourceCIDRs = [ "fd00:1::/64" ]; hardwareApproved = true; networkApproved = true; overlayIPv6 = address; publicInterface = "eth1"; };
     # No external Git access in the VM test. Comin switching is a separate live check.
     services.comin.enable = lib.mkForce false;
     systemd.network.networks."10-uplink".enable = lib.mkForce false;

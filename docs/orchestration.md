@@ -1,3 +1,5 @@
+> Latest scope supersedes the historical service sections below: TWO bare Azure NixOS hosts (AMD + ARM), SSH and Comin only. Optional WireGuard, telemetry, Wasm and Kubernetes are disabled and are not acceptance requirements. See README for the active profile.
+
 # Terraform and E2E orchestration
 
 The selected scope is Azure only, two NixOS hosts running direct systemd/Spin Wasm services with private telemetry. No Kubernetes, Knative, Raft or replicated control plane is required. GCP/Oracle proposals are rejected. Candidate mapping: node2 Standard_B2ats_v2 (AMD, telemetry and qualified x86 Wasm path), node3 Standard_B2pts_v2 (ARM, runtime/boot qualification pending), near the West Coast. Node1 remains an inactive source template. The unrelated router resource group is excluded.
@@ -56,3 +58,12 @@ The current x86 VM E2E exercises direct Spin Wasm HTTP, WireGuard, telemetry and
 OIDC bootstrap preparation is owned by the separate assigned worker, coordinated through the supervising task. This PR consumes that eventual approved setup; it creates no duplicate identities or grants.
 
 Microsoft documents [750 hours for each eligible SKU](https://azure.microsoft.com/en-us/pricing/purchase-options/azure-account) and [aggregate usage across instances of the same service](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/create-free-services). Two identical continuously running AMD nodes would require 1,488 instance-hours in a 31-day month against one 750-hour meter. The distinct-SKU guard is for this continuous strict-free proposal; it does not claim bounded part-time duplicate-SKU use is universally ineligible. Verify remaining account usage privately before enabling anything.
+
+
+## Current bare-host acceptance and deployment boundary
+
+`boot-ssh-comin` replaces the active VM acceptance job. It checks public-key SSH, rejection of root/wrong-key/unapproved-source access, password restrictions, Comin tracking a main-branch update to a real NixOS generation, bootloader reboot persistence, and absence of previously requested services. The generation is prebuilt by CI; Comin's real Nix evaluation/build/switch path consumes that cached closure. This does not establish full on-host source compilation capacity. Historical optional VM checks are exposed under `legacyPackages`, not active CI acceptance.
+
+The live E2E now checks two actual machine identities at the approved source revision, SSH and Comin active, and absence of unwanted runtime services. It does not mutate or reboot live hosts. No Wasm or overlay inventory is required.
+
+Reader-only phase A federation cannot create hosts. The proposed deployment custom role and container-scoped state roles remain in the OIDC document for separate exact approval. This module still requires existing approved NICs and images; it cannot produce an actionable saved plan before their IDs, network/access paths, approved boot mode and zero-cost evidence exist. Do not broaden the Reader role or assume paid image/state capacity.

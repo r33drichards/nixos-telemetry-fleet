@@ -2,43 +2,22 @@ let
   root = "git+file://" + toString ../.;
   fleet = builtins.getFlake root;
   lib = fleet.inputs.common.inputs.nixpkgs.lib;
-  enable = name: extra: (fleet.nixosConfigurations.${name}.extendModules {
+  enable = name: (fleet.nixosConfigurations.${name}.extendModules {
     modules = [ ({ lib, ... }: {
       lab.enable = lib.mkForce true;
       lab.hardwareApproved = lib.mkForce true;
       lab.networkApproved = lib.mkForce true;
-      lab.telemetryCapacityApproved = lib.mkForce true;
-    }) extra ];
+      lab.sshSourceCIDRs = [ "2001:db8::1/128" ];
+    }) ];
   }).config;
-  n1 = enable "node1" {};
-  n2 = enable "node2" {};
-  n3 = enable "node3" {};
-  blocked = (fleet.nixosConfigurations.node1.extendModules {
-    modules = [ ({ lib, ... }: { lab.enable = lib.mkForce true; }) ];
-  }).config;
+  profiles = map enable [ "node2" "node3" ];
+  bare = n: n.services.openssh.enable && n.services.comin.enable
+    && !n.services.prometheus.enable && !n.services.grafana.enable
+    && !n.services.prometheus.exporters.node.enable && !n.lab.wasm.enable
+    && !n.lab.wireguard && n.services.openssh.settings.PermitRootLogin == "no"
+    && !n.services.openssh.settings.PasswordAuthentication;
 in
-assert lib.all (n: !n.config.services.comin.enable && !n.config.services.prometheus.exporters.node.enable) (builtins.attrValues fleet.nixosConfigurations);
-assert lib.any (a: !a.assertion) blocked.assertions;
-assert n1.services.prometheus.exporters.node.listenAddress == "[fd42:6e69:7800::1]";
-assert fleet.nixosConfigurations.node3.pkgs.stdenv.hostPlatform.system == "aarch64-linux";
-assert n2.lab.scrapeTargets == [ "[fd42:6e69:7800::2]:9100" "[fd42:6e69:7800::3]:9100" ];
-assert n2.services.prometheus.listenAddress == "127.0.0.1";
-assert n2.services.grafana.settings.server.http_addr == "127.0.0.1";
-assert !n2.services.grafana.settings."auth.anonymous".enabled;
-assert !n2.services.caddy.enable;
-assert (builtins.head n2.services.comin.remotes).branches.testing.name == "";
-assert (builtins.head n2.services.comin.remotes).branches.main.operation == "switch";
-assert n1.systemd.services.wg-quick-wg0.serviceConfig.LoadCredential == [ "wg0.conf:/var/lib/fleet-secrets/wg0.conf" ];
-assert builtins.length n2.systemd.services.grafana.serviceConfig.LoadCredential == 2;
-assert lib.all (port: !(builtins.elem port n2.networking.firewall.allowedTCPPorts)) [ 80 443 3000 9090 9100 4317 4318 ];
-{
-  node1 = n1.system.build.toplevel.drvPath;
-  node2 = n2.system.build.toplevel.drvPath;
-  node3 = n3.system.build.toplevel.drvPath;
-  leafConfigurations = builtins.listToAttrs (map (name: { inherit name; value = (builtins.getFlake (root + "?dir=nodes/" + name)).nixosConfigurations.${name}.config.system.build.toplevel.drvPath; }) [ "node1" "node2" "node3" ]);
-  versions = {
-    grafana = n2.services.grafana.package.version;
-    prometheus = n2.services.prometheus.package.version;
-    nodeExporter = fleet.nixosConfigurations.node2.pkgs.prometheus-node-exporter.version;
-  };
-}
+assert lib.all bare profiles;
+assert lib.all (n: (builtins.head n.services.comin.remotes).branches.main.name == "main" && (builtins.head n.services.comin.remotes).branches.testing.name == "") profiles;
+assert lib.all (n: !n.config.services.comin.enable && !n.config.services.openssh.enable) (builtins.attrValues fleet.nixosConfigurations);
+{ bareProfiles = map (n: n.system.build.toplevel.drvPath) profiles; }

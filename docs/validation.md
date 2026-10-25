@@ -1,3 +1,5 @@
+> Latest scope supersedes the historical service sections below: TWO bare Azure NixOS hosts (AMD + ARM), SSH and Comin only. Optional WireGuard, telemetry, Wasm and Kubernetes are disabled and are not acceptance requirements. See README for the active profile.
+
 # Validation record
 
 ## Current capability and 1-GiB qualification changes
