@@ -76,3 +76,14 @@ Proposed state storage: dedicated `rg-nixos-fleet-state-westus2`, westus2 Standa
 Before action-time approval, fill in: exact subscription ID; existing/new fleet RG and state container resource IDs; managed-identity resource/client IDs; independent reviewer; confirmed free host/disk/image/egress/storage eligibility; boot-qualified image IDs; approved network/access and runtime-secret delivery. The router's $10 budget covers none of this fleet spending. The current Azure module still requires exactly two approved hosts and a zero-cost attestation; no single-node shortcut has been enabled.
 
 Official references: [GitHub OIDC claims/customization](https://docs.github.com/en/actions/reference/security/oidc), [Azure Login OIDC](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-azure), [AzureRM backend roles and locking](https://developer.hashicorp.com/terraform/language/backend/azurerm).
+
+
+## Phase A: read-only authentication smoke check
+
+The assigned OIDC bootstrap worker owns setup and action-time approval. Its account inspection found no GitHub environments, with `use_default=true` and `use_immutable_subject=true`; the custom subject JSON in this PR remains an uninstalled proposal. Do not duplicate grants. Phase A proposes only the dedicated fleet RG, separate plan/apply user-assigned identities and exact federation, with Reader on that RG. No VM writes or state-container access are needed for this phase.
+
+After separately approved setup, this workflow must be reviewed and landed on `main` before use. This draft PR and forks cannot satisfy the main-bound trust. Manually dispatch `cloud.yml` with `operation=oidc-check`, selecting `oidc_environment=fleet-plan` or `fleet-apply` separately. The selected protected environment supplies the identifier secrets, `FLEET_RESOURCE_GROUP` variable and `OIDC_CHECK_ENABLED=explicitly-approved`. Keep `FLEET_ENABLED` unset: auth verification does not authorize deployment.
+
+The separate job uses Azure Login, then only `az account show` and `az group show` against the exact expected subscription/tenant/RG. Output is captured privately and mismatches fail. It performs no Terraform initialization, blob access or resource write. Success proves login and that RG read, not the absence of broader roles or VM/state permissions; the bootstrap worker must inspect assignments separately. No live auth smoke test has run.
+
+The workflow is direct, not a reusable-workflow caller. Proposed trust uses `workflow_ref`; do not assume `job_workflow_ref` exists for this job. The bootstrap worker must finalize exact claims/subjects through the supervising task before any settings/grants change.
