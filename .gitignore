@@ -1,0 +1,14 @@
+# Local inventory, credentials and generated artifacts
+.local/
+.env*
+*.tfstate*
+*.tfplan
+*.tfvars
+*.tfvars.json
+.terraform/
+crash.log
+result*
+*.pem
+*.key
+kubeconfig*
+__pycache__/
