@@ -57,7 +57,7 @@ pkgs.testers.runNixOSTest {
     client.wait_until_succeeds(ssh + "operator@fd00:1::1 'id -un' | grep -qx operator", timeout=60)
     client.fail(ssh + "root@fd00:1::1 true")
     client.fail(ssh.replace('/root/test-key', '/root/wrong-key') + "operator@fd00:1::1 true")
-    server.succeed("sshd -T | grep -qx 'passwordauthentication no'; sshd -T | grep -qx 'kbdinteractiveauthentication no'")
+    server.succeed("sshd -T -f /etc/ssh/sshd_config > /tmp/effective-sshd; grep -qx 'passwordauthentication no' /tmp/effective-sshd && grep -qx 'kbdinteractiveauthentication no' /tmp/effective-sshd")
     client.succeed("ip -6 addr add fd00:1::99/64 dev eth1")
     client.fail(ssh + "-b fd00:1::99 operator@fd00:1::1 true")
     unwanted = ["wasm-http", "grafana", "prometheus", "prometheus-node-exporter", "k3s", "wg-quick-wg0"]
