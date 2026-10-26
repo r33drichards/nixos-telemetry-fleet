@@ -31,5 +31,9 @@ assert lib.all azureBoot profiles;
 assert lib.all (n: n.systemd.services.comin.unitConfig.ConditionPathExists == "/var/lib/fleet-access/bootstrap-approved") profiles;
 assert lib.all (name: azureBoot fleet.nixosConfigurations.${name}.config) [ "node2" "node3" ];
 assert lib.all (n: (builtins.head n.services.comin.remotes).branches.main.name == "main" && (builtins.head n.services.comin.remotes).branches.testing.name == "") profiles;
-assert lib.all (n: !n.config.services.comin.enable && !n.config.services.openssh.enable) (builtins.attrValues fleet.nixosConfigurations);
+assert lib.all (name: let n = fleet.nixosConfigurations.${name}; in !n.config.services.comin.enable && !n.config.services.openssh.enable) [ "node1" "node2" "node3" ];
+assert !fleet.nixosConfigurations.node2-cachix.config.services.comin.enable;
+assert fleet.nixosConfigurations.node2-cachix.config.services.openssh.enable;
+assert fleet.nixosConfigurations.node2-cachix.config.services.cachix-agent.enable;
+assert builtins.elem "/var/lib/fleet-access/cachix-approved" fleet.nixosConfigurations.node2-cachix.config.systemd.services.cachix-agent.unitConfig.ConditionPathExists;
 { bareProfiles = map (n: n.system.build.toplevel.drvPath) profiles; }
