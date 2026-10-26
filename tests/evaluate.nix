@@ -16,6 +16,8 @@ let
     && n.boot.loader.grub.efiInstallAsRemovable && !n.boot.loader.systemd-boot.enable
     && n.fileSystems."/".device == "/dev/disk/by-label/nixos"
     && n.fileSystems."/boot".device == "/dev/disk/by-label/ESP"
+    && n.fileSystems."/".fsType == "ext4" && n.fileSystems."/boot".fsType == "vfat"
+    && n.networking.useNetworkd && n.systemd.network.enable
     && lib.all (m: builtins.elem m n.boot.initrd.kernelModules)
       [ "hv_vmbus" "hv_netvsc" "hv_utils" "hv_storvsc" ]
     && n.services.cloud-init.enable && n.services.waagent.enable;
@@ -31,5 +33,10 @@ assert lib.all azureBoot profiles;
 assert lib.all (n: n.systemd.services.comin.unitConfig.ConditionPathExists == "/var/lib/fleet-access/bootstrap-approved") profiles;
 assert lib.all (name: azureBoot fleet.nixosConfigurations.${name}.config) [ "node2" "node3" ];
 assert lib.all (n: (builtins.head n.services.comin.remotes).branches.main.name == "main" && (builtins.head n.services.comin.remotes).branches.testing.name == "") profiles;
-assert lib.all (n: !n.config.services.comin.enable && !n.config.services.openssh.enable) (builtins.attrValues fleet.nixosConfigurations);
+assert bare fleet.nixosConfigurations.node2.config;
+assert fleet.nixosConfigurations.node2.config.users.users.operator.isNormalUser;
+assert fleet.nixosConfigurations.node2.config.services.openssh.settings.AuthorizedKeysFile == "/var/lib/fleet-access/authorized_keys";
+assert !fleet.nixosConfigurations.node2.config.lab.enable;
+assert fleet.nixosConfigurations.node2.config.systemd.services.comin.unitConfig.ConditionPathExists == "/var/lib/fleet-access/bootstrap-approved";
+assert lib.all (name: !fleet.nixosConfigurations.${name}.config.services.comin.enable && !fleet.nixosConfigurations.${name}.config.services.openssh.enable) [ "node1" "node3" ];
 { bareProfiles = map (n: n.system.build.toplevel.drvPath) profiles; }
