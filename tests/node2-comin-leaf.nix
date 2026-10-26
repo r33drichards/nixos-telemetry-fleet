@@ -2,7 +2,7 @@
 pkgs.testers.runNixOSTest {
   name = "node2-image-to-comin-leaf";
   nodes.server = { config, lib, ... }: {
-    imports = [ comin.nixosModules.comin ../common/modules/base.nix ];
+    imports = [ comin.nixosModules.comin ../common/modules/base.nix ../common/modules/telemetry.nix ../common/modules/wasm.nix ];
     # Reproduce the installed image's bare service state, with the real leaf
     # imported only into the generation Comin will activate. Azure hardware is
     # evaluated separately; this QEMU fixture does not emulate Hyper-V.
