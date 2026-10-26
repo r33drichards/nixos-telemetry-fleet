@@ -11,6 +11,11 @@ on:
         type: choice
         options: [fleet-plan, fleet-apply]
         default: fleet-plan
+      import_node:
+        description: Architecture selection (image-import only; must match private plan)
+        type: choice
+        options: [both, node2, node3]
+        default: both
       approved_image_transport_plan_sha256:
         description: Exact privately reviewed image transport plan hash (image-transport only)
         type: string
@@ -235,7 +240,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [node2, node3]
+        node: ${{ inputs.import_node == 'node2' && fromJSON('["node2"]') || inputs.import_node == 'node3' && fromJSON('["node3"]') || fromJSON('["node2","node3"]') }}
     permissions:
       contents: read
       id-token: write
