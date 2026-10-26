@@ -21,11 +21,10 @@ jobs:
       - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
         with:
           install_url: https://releases.nixos.org/nix/nix-2.30.2/install
-      - name: Resolve pinned candidate lock for review
+      - name: Verify committed lock remains unchanged
         run: |
-          nix flake lock ./candidates/hermes
-          python3 -c 'import json; print("HERMES_LOCK=" + json.dumps(json.load(open("candidates/hermes/flake.lock")), separators=(",", ":")))'
-          git add candidates/hermes/flake.lock
+          nix flake metadata ./candidates/hermes --no-update-lock-file --json > /tmp/hermes-metadata.json
+          git diff --exit-code -- candidates/hermes/flake.lock
       - name: Build native package and installed IRC policy checks
         run: nix flake check ./candidates/hermes --no-update-lock-file -L
       - name: Build runtime closure without upload or activation

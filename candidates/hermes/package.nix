@@ -25,7 +25,7 @@ PY
 in base.overrideAttrs (old: {
   # Replace the native assembler input; an outer environment wrapper could be
   # overwritten by the upstream launcher. Preserve its dependency graph.
-  installPhase = assert pkgs.lib.hasInfix (toString base.agentInputsFile) old.installPhase;
+  installPhase = assert pkgs.lib.hasInfix (builtins.unsafeDiscardStringContext (toString base.agentInputsFile)) old.installPhase;
     builtins.replaceStrings [ (toString base.agentInputsFile) ] [ (toString inputs) ] old.installPhase;
   passthru = (old.passthru or {}) // { fleetPlugins = plugins; fleetAgentInputs = inputs; };
 })
