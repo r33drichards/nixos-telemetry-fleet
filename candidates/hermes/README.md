@@ -1,0 +1,113 @@
+# Hermes IRC candidate — local preparation only
+
+Source pin: NousResearch/hermes-agent 05d7b5af1c42d524762c7ffce991c1fe1aa2adb1.
+Use upstream `packages.x86_64-linux.minimal`, its Python dependency lock and
+bundled IRC plugin. No bespoke protocol adapter. Upstream minimal still embeds
+TUI/web assets and tools; no browser or local inference service is started here.
+The upstream container module provisions sudo/package managers; this candidate
+instead runs the native binary as an isolated unprivileged system account.
+
+This flake is not imported into node2 or the existing deploy spec. Its outer
+flake.lock must be generated and reviewed in a Nix-capable environment before
+integration. Do not update the pending approved cache-upload revision. Build
+and measure the closure and idle/one-request peak RSS in CI before deciding
+whether 1GiB B1s is sufficient. The 512MiB cap is containment, not evidence of fit.
+No local Nix executable/store exists in this preparation environment.
+
+Service defaults disabled. Even when configured, runtime gate and root-owned
+0600 files are required outside Git/store: `/var/lib/fleet-access/hermes.env`
+(approved IRC credentials only; no provider API-key fallback), `hermes-config.json`
+(JSON accepted as YAML), and `hermes-approved`. PID1 supplies config through
+LoadCredential; service cannot read fleet-access or operator/Cachix credentials.
+Hermes state is private /var/lib/hermes. It can read its own API credentials;
+never grant it Azure/GitHub/cache/host administration credentials.
+
+Provider is selected as ChatGPT account auth (`openai-codex`), not paid API keys.
+Account/workspace, model entitlement and fresh device-code consent remain pending.
+No OAuth/login or token creation is implied. Provider traffic uses HTTPS; local endpoints,
+local models, browser, terminal and other tools are not part of initial
+qualification. Verify empty IRC toolsets against the pinned runtime before
+activation; source/config checks are not a runtime security guarantee.
+
+Tunnel owner supplies exact endpoint, direction, ports and authentication.
+Keep IRC TLS validation: a loopback forwarding endpoint must preserve the
+certificate hostname (for example approved hostname resolution through the
+forward), not disable certificate verification. No tunnel is created here.
+No inbound firewall openings. Restrict commands to approved IRC identities;
+nickname allowlists are not proof of account authentication. Channel is exactly #hermes. DMs are explicitly forbidden; upstream accepts them, so package-level policy
+qualification is mandatory before activation.
+
+Approval bundle still required: ChatGPT account/workspace/model consent and entitlement;
+documented nickname-only `yournick` policy (server identity is not authenticated); tunnel endpoints/keys/host trust;
+root-only secret delivery and privileged bootstrap; exact new candidate closure
+and activation/recovery plan. Comin remains off. No activation/agent credential
+for Cachix is created by this candidate. No paid VM/network fallback.
+
+Tests to qualify before deployment: upstream IRC adapter with local synthetic
+server; denied nick/DM and channel policy; reconnect after tunnel loss; hosted
+model mock (no paid request); memory/CPU measurement under one concurrent
+session; reboot/SSH/Cachix health and rollback. None is claimed run yet.
+
+## Proposed tunnel integration (not approved or enabled)
+
+A separate Railway service would initiate IPv6 SSH to node2 and request ONLY
+`127.0.0.1:16667` on node2, forwarding to the existing IRC service on Railway's
+private network, port7667. The existing unrelated OpenClaw tunnel stays untouched.
+The draft `tunnel.nix` defines a separate account, remote-forward-only SSH,
+PermitListen127.0.0.1:16667, GatewayPortsno, MaxSessions0 and no PTY/agent/X11/
+streamlocal forwarding. Its host-local public authorized-key file is provisioned
+only after approval. The Railway client must pin node2's host key and keep its
+private key outside Git. Server-side PermitListen constrains the node2 listener;
+it cannot constrain the destination chosen on the remote Railway side.
+
+Railway IPv6 outbound support and the entire forwarding path need a real test.
+Estimated additional service cost about $0.76/month plus egress is NOT approved
+and is distinct from Azure's existing budget. Runtime endpoint inventory is not
+included in the public candidate. Determine whether the internal IRC port speaks
+TLS: current Hermes validator requires TLS and must not be loosened silently.
+A plaintext IRC segment inside the private network needs explicit acceptance
+of the tunnel/security boundary. Hosted model HTTPS egress remains separate.
+
+
+## Confirmed intake policy and limitation
+
+Only addressed messages in #hermes from nick `yournick`; DMs disabled. The
+local `irc-channel-policy.patch` adds an early filter to the pinned upstream
+adapter, and six offline tests execute that actual patched intake method:
+allowed message/case variation pass; DM, wrong channel, other nick and
+unaddressed text reject. No live IRC/model calls were made.
+
+The draft package now replaces the native assembler plugin input with the
+patched plugin derivation. Its build check verifies the installed plugin link,
+launcher command-map environment and the same six intake cases. No Nix build
+has run here, so that wiring remains unqualified. The
+additional `hermes-irc-policy-qualified` host gate must remain absent until a
+built package demonstrates the same checks. Do not treat YAML dm_policy as
+sufficient: this pinned IRC adapter dispatches DMs and does not enforce that
+option at intake. Its parser reduces `nick!user@host` to nick and does not
+establish account-tag/hostmask identity. A peer controlling the allowed nick
+would pass nickname checks. Robert confirmed the server does not currently authenticate this identity.
+Use the requested nickname-only filter and document spoofing risk; server
+authentication changes are outside this task and do not block local preparation.
+Do not claim `yournick` alone authenticates Robert. No server-wide privileges
+or administrator command access are implied by the nickname allowlist.
+
+
+## Build qualification handoff (no upload or deployment)
+
+After publication approval, use the existing Linux GitHub Actions Nix installer
+and read-only job permissions, without an environment or secrets. First generate
+`nix flake lock ./candidates/hermes`, review and commit the resulting outer lock
+before accepting a reproducible candidate. Do not invent a lock hash locally.
+Then run on that exact commit:
+
+```sh
+nix flake check ./candidates/hermes --no-update-lock-file --print-build-logs
+nix build ./candidates/hermes#default --no-update-lock-file --out-link result-hermes
+```
+
+The package check builds the actual native package and tests its installed
+plugin, not merely a patched source fixture. It does not prove live IRC,
+OAuth, memory fit, or node2 boot. Keep this separate from the already approved
+Cachix upload run and existing deployment spec. No cache push or activation is
+part of these commands.

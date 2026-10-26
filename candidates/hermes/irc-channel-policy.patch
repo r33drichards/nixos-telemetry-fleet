@@ -1,0 +1,7 @@
+--- a/plugins/platforms/irc/adapter.py
++++ b/plugins/platforms/irc/adapter.py
+@@ -297,0 +298,4 @@
++        # Fleet intake policy: no DMs, other channels or other nicknames.
++        # Nickname matching is NOT authenticated IRC account verification.
++        if target.lower() != "#hermes" or sender_nick.lower() != "yournick":
++            return
