@@ -50,3 +50,39 @@ class UploadTests(unittest.TestCase):
         self.assertNotEqual(self.run_phase('upload',EXPECTED_SPEC_SHA256=digest),0); self.assertEqual(self.calls(),'')
     def test_failed_push_fails_job(self):
         self.mock('nix','exit 23'); self.assertEqual(self.run_phase('upload'),23)
+    def hermes(self):
+        path='/nix/store/'+'d'*32+'-node2-hermes-bootstrap-assets'
+        self.mock('readlink', 'case "$2" in bootstrap-result) echo '+path+';; *) echo /nix/store/cccccccccccccccccccccccccccccccc-deploy.json;; esac')
+        return {'UPLOAD_CANDIDATE':'hermes','EXPECTED_BOOTSTRAP_PATH':path}
+    def test_hermes_prepare_without_token(self):
+        self.assertEqual(self.run_phase('prepare',CACHIX_AUTH_TOKEN='',**self.hermes()),0)
+        self.assertEqual(self.calls().count('build -L'),3)
+        for target in ('node2-hermes-contract','node2-hermes-deploy','node2-hermes-bootstrap'):
+            self.assertIn(target,self.calls())
+        self.assertNotIn('push',self.calls()); self.assertNotIn('activate',self.calls())
+    def test_hermes_upload_both_roots_only(self):
+        config=self.hermes()
+        self.assertEqual(self.run_phase('upload',**config),0)
+        self.assertIn(config['EXPECTED_BOOTSTRAP_PATH'],self.calls())
+        self.assertIn('-deploy.json',self.calls())
+        self.assertNotIn('build',self.calls()); self.assertNotIn('activate',self.calls())
+    def test_hermes_rejects_missing_or_wrong_bootstrap_binding(self):
+        config=self.hermes()
+        for path in ('','/nix/store/'+'e'*32+'-node2-hermes-bootstrap-assets'):
+            self.assertNotEqual(self.run_phase('upload',**{**config,'EXPECTED_BOOTSTRAP_PATH':path}),0)
+        self.assertEqual(self.calls(),'')
+    def test_hermes_rejects_foreign_bootstrap_path(self):
+        config=self.hermes()
+        path='/nix/store/'+'d'*32+'-other-assets'
+        self.mock('readlink','case "$2" in bootstrap-result) echo '+path+';; *) echo /nix/store/cccccccccccccccccccccccccccccccc-deploy.json;; esac')
+        self.assertNotEqual(self.run_phase('upload',**{**config,'EXPECTED_BOOTSTRAP_PATH':path}),0)
+        self.assertEqual(self.calls(),'')
+    def test_unknown_candidate_rejected_before_build_or_upload(self):
+        for phase in ('prepare','upload'):
+            self.assertNotEqual(self.run_phase(phase,UPLOAD_CANDIDATE='other'),0)
+        self.assertEqual(self.calls(),'')
+    def test_hermes_existing_guards_remain(self):
+        config=self.hermes()
+        for overrides in ({'CACHIX_AUTH_TOKEN':''},{'GITHUB_REF':'refs/heads/pr'}, {'EXPECTED_REVISION':'e'*40},{'UPLOAD_APPROVED':''},{'EXPECTED_SPEC_SHA256':'0'*64}):
+            self.assertNotEqual(self.run_phase('upload',**{**config,**overrides}),0)
+        self.assertEqual(self.calls(),'')

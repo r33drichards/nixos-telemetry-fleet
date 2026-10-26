@@ -2,6 +2,12 @@ name: Upload reviewed node2 closure
 on:
   workflow_dispatch:
     inputs:
+      candidate:
+        description: Reviewed node2 candidate (no activation)
+        type: choice
+        options: [node2, hermes]
+        default: node2
+        required: true
       expected_revision:
         description: Exact reviewed main commit
         type: string
@@ -18,6 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
+      UPLOAD_CANDIDATE: ${{ inputs.candidate }}
       EXPECTED_REVISION: ${{ inputs.expected_revision }}
       UPLOAD_APPROVED: ${{ vars.CACHIX_UPLOAD_APPROVED }}
     steps:
@@ -33,8 +40,12 @@ jobs:
         run: |
           bash scripts/cachix-upload.sh prepare
           echo "spec_sha256=$(sha256sum deploy-result | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          if [[ "$UPLOAD_CANDIDATE" == hermes ]]; then
+            echo "bootstrap_path=$(readlink -f bootstrap-result)" >> "$GITHUB_OUTPUT"
+          fi
       - name: Upload only the validated runtime closure
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          EXPECTED_BOOTSTRAP_PATH: ${{ steps.prepare.outputs.bootstrap_path }}
           EXPECTED_SPEC_SHA256: ${{ steps.prepare.outputs.spec_sha256 }}
         run: bash scripts/cachix-upload.sh upload
