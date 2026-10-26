@@ -1,4 +1,5 @@
-# First-boot qualification only. This does not open SSH or activate Comin.
+# First-boot qualification with explicitly approved IPv6-only, key-only SSH.
+# Guest key delivery/firewall qualification is required; Comin stays paused.
 variable "enabled" { default = false }
 variable "location" {
   type    = string
@@ -13,11 +14,11 @@ variable "resource_group_name" { type = string }
 variable "image_version_id" { type = string }
 variable "ssh_public_key" { type = string }
 variable "approval" {
-  type    = object({ standard_unsigned_gen2 = bool, closed_network = bool, free_compute_and_p6 = bool, quota_capacity_checked = bool, state_and_roles = bool, image_region_ready = bool, monthly_ancillary_usd = number, evidence = string })
-  default = { standard_unsigned_gen2 = false, closed_network = false, free_compute_and_p6 = false, quota_capacity_checked = false, state_and_roles = false, image_region_ready = false, monthly_ancillary_usd = 0, evidence = "" }
+  type    = object({ standard_unsigned_gen2 = bool, public_ipv6_ssh = bool, free_compute_and_p6 = bool, quota_capacity_checked = bool, state_and_roles = bool, image_region_ready = bool, monthly_ancillary_usd = number, evidence = string })
+  default = { standard_unsigned_gen2 = false, public_ipv6_ssh = false, free_compute_and_p6 = false, quota_capacity_checked = false, state_and_roles = false, image_region_ready = false, monthly_ancillary_usd = 0, evidence = "" }
 }
 locals {
-  approved = var.approval.standard_unsigned_gen2 && var.approval.closed_network && var.approval.free_compute_and_p6 && var.approval.quota_capacity_checked && var.approval.state_and_roles && var.approval.image_region_ready && var.approval.monthly_ancillary_usd >= 0 && var.approval.monthly_ancillary_usd <= 3 && length(var.approval.evidence) > 0
+  approved = var.approval.standard_unsigned_gen2 && var.approval.public_ipv6_ssh && var.approval.free_compute_and_p6 && var.approval.quota_capacity_checked && var.approval.state_and_roles && var.approval.image_region_ready && var.approval.monthly_ancillary_usd >= 0 && var.approval.monthly_ancillary_usd <= 3 && length(var.approval.evidence) > 0
   create   = var.enabled && local.approved
 }
 resource "terraform_data" "approval" {
@@ -25,7 +26,7 @@ resource "terraform_data" "approval" {
   lifecycle {
     precondition {
       condition     = local.approved
-      error_message = "Explicit unsigned Gen2, closed network, free B1s/P6, quota, state/RBAC and <=$3 monthly evidence are required."
+      error_message = "Explicit unsigned Gen2, public IPv6 TCP22, free B1s/P6, quota, state/RBAC and <=$3 monthly evidence are required."
     }
   }
 }
@@ -46,9 +47,20 @@ resource "azurerm_subnet" "fleet" {
 }
 resource "azurerm_network_security_group" "closed" {
   count               = local.create ? 1 : 0
-  name                = "nsg-nixos-node2-closed"
+  name                = "nsg-nixos-node2-ssh6"
   location            = var.location
   resource_group_name = var.resource_group_name
+  security_rule {
+    name                       = "AllowIPv6KeyOnlySSH"
+    priority                   = 1000
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "::/0"
+    destination_address_prefix = "*"
+  }
   security_rule {
     name                       = "DenyAllInbound"
     priority                   = 4096
@@ -120,7 +132,7 @@ resource "azurerm_linux_virtual_machine" "node2" {
     disk_size_gb         = 64
   }
   boot_diagnostics {}
-  tags       = { project = "nixos-telemetry-fleet", purpose = "closed-boot-canary", managed_by = "terraform" }
+  tags       = { project = "nixos-telemetry-fleet", purpose = "ssh6-boot-canary", managed_by = "terraform" }
   depends_on = [terraform_data.approval, azurerm_network_interface_security_group_association.closed]
 }
 output "node_count" { value = length(azurerm_linux_virtual_machine.node2) }

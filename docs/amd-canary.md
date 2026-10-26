@@ -1,6 +1,6 @@
-# Closed B1s Denmark boot canary
+# IPv6 SSH B1s Denmark boot canary
 
-The separate `terraform/amd-canary` root prepares one free-eligible Standard_B1s in Denmark East (`denmarkeast`) and a 64-GiB Premium_LRS (P6) OS disk from the verified x64 gallery image. It is disabled by default. The owner approved unsigned standard Gen2 with Secure Boot/vTPM off and deny-all inbound for first-boot qualification. This is not yet usable SSH or active Comin: the existing image's guest access and Comin marker remain closed/absent.
+The separate `terraform/amd-canary` root prepares one free-eligible Standard_B1s in Denmark East (`denmarkeast`) and a 64-GiB Premium_LRS (P6) OS disk from the verified x64 gallery image. It is disabled by default. The owner approved unsigned standard Gen2 with Secure Boot/vTPM off and TCP22 from every IPv6 address (`::/0`), with all other inbound denied, for first-boot qualification. The NSG rule alone does not establish usable SSH: the imported image still has a closed guest firewall and a custom AuthorizedKeysFile. Guest activation/key delivery must be qualified before claiming connectivity; Comin remains paused. The selected Robert public key is supplied privately as `ssh_public_key`; password authentication is disabled in Terraform and the image disables root, password and keyboard-interactive login.
 
 The owner selected Denmark East after usable B1s quota was found. B1s has one vCPU and 1 GiB RAM; AMD CPU vendor is not guaranteed. The legacy `amd-canary` root and operation names identify this single x64 test host, not an additional AMD VM. Current availability, one remaining family/regional vCPU quota, Premium IO support, free compute/P6 evidence and completed image replication in the selected region are required. The existing West US 3 image alone does not establish Denmark readiness. No paid SKU or region fallback is automatic. A zero quota or an empty/unreadable quota response fails closed. A quota-support case is separate from deployment.
 
@@ -16,7 +16,7 @@ Canary state operations serialize separately from image import, allowing indepen
 
 ## Network and acceptance
 
-Proposed dual-stack VNet/subnet use private IPv4 and IPv6. Public addressing is IPv6 only; default outbound IPv4 access is explicitly disabled. No public IPv4, paid NAT, load balancer or peering. The NIC's NSG denies all inbound at priority4096 before the VM is created. Managed boot diagnostics are enabled for first-boot evidence; their storage cost belongs in the ancillary estimate and any returned access URLs must stay private.
+Proposed dual-stack VNet/subnet use private IPv4 and IPv6. Public addressing is IPv6 only; default outbound IPv4 access is explicitly disabled. No public IPv4, paid NAT, load balancer or peering. The NIC’s NSG allows only TCP22 from `::/0` at priority1000 and denies all remaining inbound at priority4096, before the VM is created. IPv4 SSH is not allowed. `approval.public_ipv6_ssh` must explicitly be true; an old closed-network attestation cannot activate this rule. Managed boot diagnostics are enabled for first-boot evidence; their storage cost belongs in the ancillary estimate and any returned access URLs must stay private.
 
 The initial supplied public key is a private Terraform input, not a new generated credential. No source CIDRs or second key are invented. Azure key delivery into the image's custom AuthorizedKeysFile, IPv6 acquisition/egress, full SSH and Comin activation/reboot still need qualification. VM running state alone does not prove those behaviors.
 

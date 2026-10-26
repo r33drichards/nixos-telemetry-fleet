@@ -13,8 +13,8 @@ spec.loader.exec_module(sku)
 
 def validate(topology, skus, usage):
     a = topology.get('approval', {})
-    if topology.get('enabled') is not True or not all(a.get(k) is True for k in ('standard_unsigned_gen2', 'closed_network', 'free_compute_and_p6', 'quota_capacity_checked', 'state_and_roles', 'image_region_ready')):
-        raise ValueError('Explicit closed canary approvals required')
+    if topology.get('enabled') is not True or not all(a.get(k) is True for k in ('standard_unsigned_gen2', 'public_ipv6_ssh', 'free_compute_and_p6', 'quota_capacity_checked', 'state_and_roles', 'image_region_ready')):
+        raise ValueError('Explicit IPv6 SSH canary approvals required')
     if not 0 <= a.get('monthly_ancillary_usd', -1) <= 3 or not a.get('evidence'):
         raise ValueError('Cost evidence required')
     region = topology.get('location', 'denmarkeast')
