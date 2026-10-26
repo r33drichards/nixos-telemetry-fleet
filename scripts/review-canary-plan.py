@@ -120,13 +120,33 @@ def review(plan, binary, revision, run, bootstrap):
         elif isinstance(value, list):
             for child in value: no_provisioners(child)
     no_provisioners(plan.get('configuration', {}))
+    variables = {k: v['value'] for k, v in plan['variables'].items()}
+    outbound_trial = variables.get('shared_default_outbound_ipv4', False)
+    require(type(outbound_trial) is bool)
+    if outbound_trial:
+        require(variables['approval'].get('shared_default_outbound_ipv4') is True)
     changes = plan.get('resource_changes', [])
     require(len(changes) == len(ADDRESSES) and {x['address'] for x in changes} == ADDRESSES)
     require(not plan.get('resource_drift') and not plan.get('deferred_changes'))
     resources = {}
     for x in changes:
-        require(x.get('mode') == 'managed' and x['change']['actions'] == ['create'])
-        require(x['change'].get('before') is None and not x.get('deposed'))
+        require(x.get('mode') == 'managed' and not x.get('deposed'))
+        change = x['change']
+        if outbound_trial:
+            def has_unknown(value):
+                if isinstance(value, dict): return any(has_unknown(v) for v in value.values())
+                if isinstance(value, list): return any(has_unknown(v) for v in value)
+                return value is True
+            require(not has_unknown(change.get('after_unknown', {})))
+            require(isinstance(change.get('before'), dict))
+            if x['address'] == 'azurerm_subnet.fleet[0]':
+                require(change['actions'] == ['update'] and change['before']['default_outbound_access_enabled'] is False)
+                expected_after = dict(change['before'], default_outbound_access_enabled=True)
+                require(change['after'] == expected_after)
+            else:
+                require(change['actions'] == ['no-op'] and change['before'] == change['after'])
+        else:
+            require(change['actions'] == ['create'] and change.get('before') is None)
         resources[x['address']] = x['change']['after']
     variables = {k: v['value'] for k, v in plan['variables'].items()}
     require(variables['enabled'] is True and variables['location'] == 'denmarkeast')
@@ -172,7 +192,7 @@ def review(plan, binary, revision, run, bootstrap):
     require({r['name'] for r in nsg['security_rule']} == {'AllowIPv6KeyOnlySSH', 'DenyAllInbound'})
     equal_fields(resources['azurerm_public_ip.node2[0]'], dict(name='pip6-nixos-node2', allocation_method='Static', sku='Standard', ip_version='IPv6'))
     equal_fields(resources['azurerm_virtual_network.fleet[0]'], dict(name='vnet-nixos-fleet-denmarkeast', address_space=['10.78.0.0/16', 'fd42:6e69:7800::/48']))
-    equal_fields(resources['azurerm_subnet.fleet[0]'], dict(name='bare-hosts', address_prefixes=['10.78.1.0/24', 'fd42:6e69:7800:1::/64'], default_outbound_access_enabled=False))
+    equal_fields(resources['azurerm_subnet.fleet[0]'], dict(name='bare-hosts', address_prefixes=['10.78.1.0/24', 'fd42:6e69:7800:1::/64'], default_outbound_access_enabled=outbound_trial))
     require(not resources['azurerm_virtual_network.fleet[0]'].get('dns_servers'))
     subnet = resources['azurerm_subnet.fleet[0]']
     require(not subnet.get('delegation') and not subnet.get('service_endpoints') and not subnet.get('service_endpoint_policy_ids'))
@@ -191,7 +211,9 @@ def review(plan, binary, revision, run, bootstrap):
     return dict(schema=1, run_id=run, revision=revision, terraform_root=ROOT,
                 backend_key='fleet/amd-canary/terraform.tfstate', plan_sha256=hashlib.sha256(binary).hexdigest(),
                 resource_counts={t: sum(a.startswith(t+'.') for a in ADDRESSES) for t in sorted({a.split('.')[0] for a in ADDRESSES})},
-                actions={'create': 8, 'update': 0, 'delete': 0}, region='denmarkeast', vm='Standard_B1s', os_disk='Premium_LRS/P6/64GiB',
+                plan_intent='enable-shared-default-outbound' if outbound_trial else 'initial-create',
+                outbound='shared default IPv4 trial; no dedicated IPv4/NAT/LB' if outbound_trial else 'default IPv4 outbound disabled',
+                actions={'create': 0, 'update': 1, 'delete': 0, 'no-op': 7} if outbound_trial else {'create': 8, 'update': 0, 'delete': 0}, region='denmarkeast', vm='Standard_B1s', os_disk='Premium_LRS/P6/64GiB',
                 image='existing node2-x64 gallery version 0.1.0', ssh_key_fingerprint=key_fingerprint,
                 ingress='IPv6 TCP22 from ::/0 only; all other inbound denied',
                 planned_authentication='operator public key only; password/root disabled', planned_comin='inactive; no approval marker',
