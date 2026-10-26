@@ -2,6 +2,28 @@
   description = "Two-node Azure fleet with retained inactive node1 template: IPv6, WireGuard, Comin and private node metrics";
   inputs.common.url = "path:./common";
   outputs = { self, common }: {
+    nixosConfigurations.node2-cachix = common.lib.mkNode {
+      revision = self.rev or null;
+      system = "x86_64-linux";
+      name = "node2";
+      address = "fd42:6e69:7800::2";
+      extraModules = [ ./deploy/node2-access.nix ./deploy/cachix-node2.nix ];
+    };
+    checks.x86_64-linux.node2-cachix-contract = import ./tests/cachix-contract.nix {
+      pkgs = common.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      candidate = self.nixosConfigurations.node2-cachix.config;
+    };
+    packages.x86_64-linux.node2-deploy = let
+      pkgs = common.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      health = pkgs.writeShellApplication {
+        name = "node2-health";
+        runtimeInputs = [ pkgs.systemd pkgs.openssh pkgs.gnugrep pkgs.iproute2 ];
+        text = builtins.readFile ./deploy/node2-health.sh;
+      };
+    in pkgs.writeText "deploy.json" (builtins.toJSON {
+      agents.node2 = "${self.nixosConfigurations.node2-cachix.config.system.build.toplevel}";
+      rollbackScript.x86_64-linux = "${health}/bin/node2-health";
+    });
     packages.x86_64-linux.azure-node2 = import ./images/azure.nix {
       nixpkgs = common.inputs.nixpkgs; comin = common.inputs.comin;
       system = "x86_64-linux"; hostname = "node2"; revision = self.rev or null;

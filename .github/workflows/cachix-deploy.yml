@@ -1,0 +1,28 @@
+name: Prepare Cachix node2 closure
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cachix-build-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+      - name: Evaluate and build the real Azure candidate contract
+        run: nix build -L .#checks.x86_64-linux.node2-cachix-contract
+      - name: Build complete system and health-check closure on CI
+        run: nix build -L .#node2-deploy --out-link deploy-result
+      - name: Validate deployment specification
+        run: python3 scripts/check-cachix-spec.py deploy-result
+      # Build only: no tokens, protected environments, upload or activation.
