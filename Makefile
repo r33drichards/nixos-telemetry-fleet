@@ -16,3 +16,6 @@ tf-check:
 	terraform -chdir=terraform test
 	terraform -chdir=terraform/modules/azure-hosts init -backend=false -input=false -lockfile=readonly
 	terraform -chdir=terraform/modules/azure-hosts test
+	terraform -chdir=terraform/amd-canary init -backend=false -input=false -lockfile=readonly
+	terraform -chdir=terraform/amd-canary validate
+	terraform -chdir=terraform/amd-canary test

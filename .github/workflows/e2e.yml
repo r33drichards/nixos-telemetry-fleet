@@ -30,3 +30,5 @@ jobs:
         run: make eval profile-check
       - name: Boot NixOS and verify SSH, Comin update and reboot
         run: nix build -L .#checks.x86_64-linux.boot-ssh-comin
+      - name: Verify cloud-init IPv6 SSH bootstrap and firewall reboot persistence
+        run: nix build -L .#checks.x86_64-linux.cloud-init-ssh6

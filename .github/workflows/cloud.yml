@@ -4,7 +4,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [oidc-check, image-auth-check, image-transport, image-import, plan, apply, e2e]
+        options: [oidc-check, image-auth-check, image-transport, image-import, plan, apply, amd-plan, amd-apply, e2e]
         required: true
       oidc_environment:
         description: Identity to verify (oidc-check only)
@@ -31,7 +31,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: fleet-cloud-state
+  group: ${{ startsWith(inputs.operation, 'amd-') && 'fleet-amd-state' || 'fleet-cloud-state' }}
   cancel-in-progress: false
 jobs:
   oidc-check:
@@ -97,10 +97,10 @@ jobs:
           python3 scripts/azure-oidc-check.py
           python3 scripts/image-auth-check.py
   terraform:
-    if: github.ref == 'refs/heads/main' && (inputs.operation == 'plan' || inputs.operation == 'apply')
+    if: github.ref == 'refs/heads/main' && (inputs.operation == 'plan' || inputs.operation == 'apply' || inputs.operation == 'amd-plan' || inputs.operation == 'amd-apply')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: ${{ inputs.operation == 'apply' && 'fleet-apply' || 'fleet-plan' }}
+    environment: ${{ (inputs.operation == 'apply' || inputs.operation == 'amd-apply') && 'fleet-apply' || 'fleet-plan' }}
     permissions:
       contents: read
       id-token: write
@@ -112,12 +112,13 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_IN_AUTOMATION: 'true'
       TF_INPUT: 'false'
-      OPERATION: ${{ inputs.operation }}
+      OPERATION: ${{ (inputs.operation == 'apply' || inputs.operation == 'amd-apply') && 'apply' || 'plan' }}
+      TF_ROOT: ${{ startsWith(inputs.operation, 'amd-') && 'terraform/amd-canary' || 'terraform' }}
       PLAN_RUN_ID: ${{ inputs.plan_run_id }}
       APPROVED_PLAN_SHA256: ${{ inputs.approved_plan_sha256 }}
-      FLEET_ENABLED: ${{ vars.FLEET_ENABLED }}
-      BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG }}
-      TOPOLOGY: ${{ secrets.TF_TOPOLOGY_JSON }}
+      FLEET_ENABLED: ${{ vars[startsWith(inputs.operation, 'amd-') && 'AMD_CANARY_ENABLED' || 'FLEET_ENABLED'] }}
+      BACKEND_CONFIG: ${{ secrets[startsWith(inputs.operation, 'amd-') && 'AMD_BACKEND_CONFIG' || 'TF_BACKEND_CONFIG'] }}
+      TOPOLOGY: ${{ secrets[startsWith(inputs.operation, 'amd-') && 'AMD_TOPOLOGY_JSON' || 'TF_TOPOLOGY_JSON'] }}
       PLAN_STORAGE_ACCOUNT: ${{ secrets.PLAN_STORAGE_ACCOUNT }}
       PLAN_CONTAINER: ${{ secrets.PLAN_CONTAINER }}
     steps:
