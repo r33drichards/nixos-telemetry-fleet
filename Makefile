@@ -1,6 +1,9 @@
 SHELL := /usr/bin/env bash
 .PHONY: check eval
 eval:
+	# Materialize the pinned upstream filtered source before read-only flake checking.
+	# Nix --no-build otherwise computes its store path without writing it.
+	nix eval --raw .#nixosConfigurations.node2-hermes.config.system.build.toplevel.drvPath --no-update-lock-file >/dev/null
 	nix flake check --no-build --all-systems
 	for node in node1 node2 node3; do nix flake check --no-build "./nodes/$$node"; done
 check:

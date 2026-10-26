@@ -1,0 +1,65 @@
+name: Qualify Hermes IRC candidate
+on:
+  pull_request:
+    paths:
+      - 'candidates/hermes/**'
+      - '.github/workflows/hermes-build.yml'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'deploy/node2-hermes*'
+      - 'tests/hermes-*'
+      - 'tests/test_structure.py'
+      - 'Makefile'
+permissions:
+  contents: read
+concurrency:
+  group: hermes-build-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+      - name: Verify committed lock remains unchanged
+        run: |
+          nix flake metadata ./candidates/hermes --no-update-lock-file --json > /tmp/hermes-metadata.json
+          git diff --exit-code -- candidates/hermes/flake.lock
+      - name: Build native package and installed IRC policy checks
+        run: nix flake check ./candidates/hermes --no-update-lock-file -L
+      - name: Build runtime closure without upload or activation
+        run: nix build ./candidates/hermes#default --no-update-lock-file --out-link result-hermes -L
+  integrated-node2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+          extra_nix_config: |
+            system-features = nixos-test benchmark big-parallel kvm
+      - name: Require VM acceleration
+        run: test -r /dev/kvm && test -w /dev/kvm
+      - name: Verify integrated lock without updating inputs
+        run: |
+          nix flake metadata . --no-update-lock-file --json > /tmp/fleet-metadata.json
+          git diff --exit-code -- flake.lock
+      - name: Build actual integrated Azure closure contract
+        run: nix build -L .#checks.x86_64-linux.node2-hermes-contract --no-update-lock-file --no-link
+      - name: Build deployment spec and bootstrap assets without upload
+        run: |
+          nix build -L .#node2-hermes-deploy --no-update-lock-file --out-link hermes-deploy-result
+          nix build -L .#node2-hermes-bootstrap --no-update-lock-file --out-link hermes-bootstrap-result
+          python3 scripts/check-cachix-spec.py hermes-deploy-result
+      - name: Verify restricted transport, bootstrap and reboot with no model credentials
+        run: nix build -L .#checks.x86_64-linux.hermes-tunnel --no-update-lock-file --no-link
