@@ -3,6 +3,14 @@
 set -eu
 reject() { echo 'SSH bootstrap: effective policy rejected' >&2; exit 1; }
 [ "$#" -eq 2 ] || reject
+# OpenSSH versions vary directive-name casing. Preserve values exactly while
+# normalizing the names, as the existing cloud-init bootstrap already does.
+umask 077
+normalized=$(mktemp -d)
+trap 'rm -rf "$normalized"' EXIT HUP INT TERM
+awk '{ $1=tolower($1); print }' "$1" > "$normalized/operator"
+awk '{ $1=tolower($1); print }' "$2" > "$normalized/tunnel"
+set -- "$normalized/operator" "$normalized/tunnel"
 for policy in "$1" "$2"; do
   # OpenSSH repeats list-valued entries (AllowUsers, ListenAddress). Reject
   # duplicates of security scalars; aggregate AllowUsers below instead.

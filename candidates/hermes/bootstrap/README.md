@@ -39,9 +39,9 @@ Local validation:
     python3 candidates/hermes/bootstrap/test_policy.py
     sh -n candidates/hermes/bootstrap/check-ssh-policy.sh candidates/hermes/bootstrap/ssh6-per-boot.sh
 
-Ten test methods cover valid/reordered/repeated-list output, each missing
+Eleven test methods cover valid/reordered/repeated-list output, each missing
 tunnel restriction, broadening, unexpected users, operator regressions,
-duplicate scalars, denies and public-key parameter shape. The final test parses the actual tunnel.nix Match
+duplicate scalars, denies, directive casing and public-key parameter shape. The final test parses the actual tunnel.nix Match
 block with local OpenSSH sshd -T for both users and feeds both results to the
 checker. Its temporary host key is an isolated test fixture, removed afterwards;
 no listener starts, real host key is read, or deployment credential is created.

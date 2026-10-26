@@ -32,6 +32,10 @@ class PolicyTests(unittest.TestCase):
             r=subprocess.run(['sh',str(ROOT/'check-ssh-policy.sh'),str(a),str(b)],capture_output=True)
             self.assertEqual(r.returncode==0,expected, r.stderr.decode())
     def test_approved(self): self.check(OPERATOR,TUNNEL,True)
+    def test_directive_name_case(self):
+        def capitalized(policy):
+            return '\n'.join(line.split(' ',1)[0].upper()+' '+line.split(' ',1)[1] for line in policy.splitlines())+'\n'
+        self.check(capitalized(OPERATOR),capitalized(TUNNEL),True)
     def test_order(self): self.check(OPERATOR.replace('operator hermes-tunnel','hermes-tunnel operator'),TUNNEL,True)
     def test_each_tunnel_restriction(self):
         for line in TUNNEL.splitlines():
