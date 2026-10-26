@@ -1,0 +1,38 @@
+name: Verify exact Hermes closure across trusted caches
+on:
+  push:
+    branches: [fix/hermes-multi-cache-proof]
+    paths: ['.github/workflows/hermes-cache-proof.yml']
+permissions:
+  contents: read
+jobs:
+  signed-substitution:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+      - name: Fetch entire existing closure into an empty store with required signatures
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          cache=https://r33drichards-nixos-fleet.cachix.org
+          upstream=https://cache.nixos.org
+          key='r33drichards-nixos-fleet.cachix.org-1:olHCUKLC5yhwGhf0y+ZI8LbfQ6L/ZQwtN2vsjIAgV9M='
+          spec=/nix/store/yn0nfwnpssbra9l25pkv1ssmljsnfya4-deploy.json
+          assets=/nix/store/7f5p184jjylgc8n5b9zn3hvfrp7jmalr-node2-hermes-bootstrap-assets
+          system=/nix/store/995hp7zvigqjc9n1g2w05l44r9vbcl6d-nixos-system-node2-azure-26.05.20261021.da6dc0e
+          missing=/nix/store/3n7aiwyh3vhx8iqpy6i7jabfr10h4akp-iproute2-7.0.0
+          fresh="$RUNNER_TEMP/hermes-multi-cache-store"
+          test ! -e "$fresh"
+          store="local?root=$fresh"
+          nix-store --store "$store" --realise --option substituters "$cache $upstream" --option extra-trusted-public-keys "$key" --option require-sigs true --option max-jobs 0 --option builders '' --option fallback false "$spec" "$assets"
+          nix --extra-experimental-features nix-command store verify --store "$store" --recursive --sigs-needed 1 --substituter "$cache" --substituter "$upstream" --option extra-trusted-public-keys "$key" "$spec" "$assets"
+          echo 'a67523564f537a462e96fb38974b03a6eb1af310c35ee41d1a35ef156d3fa060  '"$fresh$spec" | sha256sum -c -
+          test "$(jq -r .agents.node2 "$fresh$spec")" = "$system"
+          nix-store --store "$store" -qR "$spec" "$assets" > "$RUNNER_TEMP/hermes-verified-closure.txt"
+          grep -Fx "$missing" "$RUNNER_TEMP/hermes-verified-closure.txt"
+          printf 'Verified transitive store paths: '
+          wc -l < "$RUNNER_TEMP/hermes-verified-closure.txt"
+          echo 'FULL_CLOSURE_SUBSTITUTION_AND_SIGNATURE_VERIFICATION_PASSED'
