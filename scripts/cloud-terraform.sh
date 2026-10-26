@@ -13,8 +13,14 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 printf '%s' "$BACKEND_CONFIG" > "$work/backend.hcl"
 printf '%s' "$TOPOLOGY" > "$work/topology.tfvars.json"
+backend_scope=()
+if [ "$TF_ROOT" = terraform/amd-canary ]; then
+  # Last backend argument binds this root to its dedicated state, even if a
+  # stale private backend file contains the legacy fleet key.
+  backend_scope=(-backend-config=key=fleet/amd-canary/terraform.tfstate)
+fi
 # Private inventory and plan output must never enter public Actions logs/artifacts.
-if ! terraform -chdir="$TF_ROOT" init -input=false -lockfile=readonly -backend-config="$work/backend.hcl" >"$work/init.log" 2>&1; then
+if ! terraform -chdir="$TF_ROOT" init -input=false -lockfile=readonly -backend-config="$work/backend.hcl" "${backend_scope[@]}" >"$work/init.log" 2>&1; then
   echo 'Backend init failed; inspect via approved private diagnostics.' >&2; exit 1
 fi
 if [ "$OPERATION" = plan ]; then

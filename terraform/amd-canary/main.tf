@@ -2,10 +2,10 @@
 variable "enabled" { default = false }
 variable "location" {
   type    = string
-  default = "westus3"
+  default = "denmarkeast"
   validation {
-    condition     = contains(["westus", "westus2", "westus3", "centralus", "eastus", "eastus2", "northcentralus", "southcentralus", "westcentralus"], var.location)
-    error_message = "Select a reviewed US Azure region; quota, free entitlement and image replication must be verified there."
+    condition     = contains(["denmarkeast", "westus", "westus2", "westus3", "centralus", "eastus", "eastus2", "northcentralus", "southcentralus", "westcentralus"], var.location)
+    error_message = "Select Denmark East or a reviewed US Azure region; quota, free entitlement and image replication must be verified there."
   }
 }
 variable "subscription_id" { type = string }
@@ -25,7 +25,7 @@ resource "terraform_data" "approval" {
   lifecycle {
     precondition {
       condition     = local.approved
-      error_message = "Explicit unsigned Gen2, closed network, free AMD/P6, quota, state/RBAC and <=$3 monthly evidence are required."
+      error_message = "Explicit unsigned Gen2, closed network, free B1s/P6, quota, state/RBAC and <=$3 monthly evidence are required."
     }
   }
 }
@@ -100,7 +100,7 @@ resource "azurerm_linux_virtual_machine" "node2" {
   name                            = "nixos-node2"
   location                        = var.location
   resource_group_name             = var.resource_group_name
-  size                            = "Standard_B2ats_v2"
+  size                            = "Standard_B1s"
   source_image_id                 = var.image_version_id
   network_interface_ids           = [azurerm_network_interface.node2[0].id]
   admin_username                  = "operator"

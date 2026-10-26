@@ -8,10 +8,10 @@ m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 
 class CanaryPreflight(unittest.TestCase):
     def setUp(self):
-        self.topology={'enabled':True,'location':'westus3','approval':dict.fromkeys(('standard_unsigned_gen2','closed_network','free_compute_and_p6','quota_capacity_checked','state_and_roles','image_region_ready'),True)}
+        self.topology={'enabled':True,'location':'denmarkeast','approval':dict.fromkeys(('standard_unsigned_gen2','closed_network','free_compute_and_p6','quota_capacity_checked','state_and_roles','image_region_ready'),True)}
         self.topology['approval'].update(monthly_ancillary_usd=1,evidence='fixture')
-        self.skus=[{'name':'Standard_B2ats_v2','resourceType':'virtualMachines','locations':['westus3'],'family':'standardBasv2Family','restrictions':[],'capabilities':[{'name':'HyperVGenerations','value':'V2'},{'name':'CpuArchitectureType','value':'x64'}]}]
-        self.usage=[{'name':{'value':'standardBasv2Family'},'limit':2,'currentValue':0},{'name':{'value':'cores'},'limit':2,'currentValue':0}]
+        self.skus=[{'name':'Standard_B1s','resourceType':'virtualMachines','locations':['denmarkeast'],'family':'standardBSFamily','restrictions':[],'capabilities':[{'name':'PremiumIO','value':'True'},{'name':'HyperVGenerations','value':'V2'},{'name':'CpuArchitectureType','value':'x64'}]}]
+        self.usage=[{'name':{'value':'standardBSFamily'},'limit':1,'currentValue':0},{'name':{'value':'cores'},'limit':1,'currentValue':0}]
     def test_zero_family_quota_fails(self):
         self.usage[0]['limit']=0
         with self.assertRaises(ValueError):m.validate(self.topology,self.skus,self.usage)
@@ -29,3 +29,7 @@ class CanaryPreflight(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.validate_plan_actions({'resource_changes':[{'change':{'actions':['delete','create']}}]})
         m.validate_plan_actions({'resource_changes':[{'change':{'actions':['create']}}]})
+
+    def test_premium_disk_support_must_be_verified(self):
+        self.skus[0]["capabilities"][0]["value"]="False"
+        with self.assertRaises(ValueError):m.validate(self.topology,self.skus,self.usage)

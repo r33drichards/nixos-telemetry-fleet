@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only live availability and quota checks for the explicit closed AMD canary."""
+"""Read-only live availability and quota checks for the explicit closed x64 canary."""
 import importlib.util
 import json
 import pathlib
@@ -17,19 +17,22 @@ def validate(topology, skus, usage):
         raise ValueError('Explicit closed canary approvals required')
     if not 0 <= a.get('monthly_ancillary_usd', -1) <= 3 or not a.get('evidence'):
         raise ValueError('Cost evidence required')
-    region = topology.get('location', 'westus3')
-    if region not in ('westus', 'westus2', 'westus3', 'centralus', 'eastus', 'eastus2', 'northcentralus', 'southcentralus', 'westcentralus'):
+    region = topology.get('location', 'denmarkeast')
+    if region not in ('denmarkeast', 'westus', 'westus2', 'westus3', 'centralus', 'eastus', 'eastus2', 'northcentralus', 'southcentralus', 'westcentralus'):
         raise ValueError('Unapproved region')
-    node = dict(location=region, size='Standard_B2ats_v2', architecture='x86_64')
+    node = dict(location=region, size='Standard_B1s', architecture='x86_64')
     sku.validate(node, skus, require_trusted_launch=False)
     matches = [s for s in skus if s.get('name') == node['size'] and s.get('resourceType') == 'virtualMachines']
+    caps = {c['name']: c['value'] for c in matches[0].get('capabilities', [])}
+    if caps.get('PremiumIO', '').lower() != 'true':
+        raise ValueError('Premium OS disk support unverified')
     family = matches[0].get('family', '').lower()
     if not family:
         raise ValueError('SKU family not reported')
     for category in (family, 'cores'):
         entries = [u for u in usage if u.get('name', {}).get('value', '').lower() == category]
-        if len(entries) != 1 or entries[0]['limit'] - entries[0]['currentValue'] < 2:
-            raise ValueError('Two free vCPUs of family and regional quota required')
+        if len(entries) != 1 or entries[0]['limit'] - entries[0]['currentValue'] < 1:
+            raise ValueError('One available vCPU of family and regional quota required')
 
 
 def read(args):
@@ -57,14 +60,14 @@ def main():
         topology = json.loads(pathlib.Path(sys.argv[1]).read_text())
     else:
         raise ValueError('Private topology or saved plan required')
-    region = topology.get('location', 'westus3')
-    validate(topology, read(['vm', 'list-skus', '--resource-type', 'virtualMachines', '--location', region, '--size', 'Standard_B2ats_v2', '--all']), read(['vm', 'list-usage', '--location', region]))
-    print('AMD availability/Gen2/architecture and family/regional quota checks passed; free entitlement remains separately attested.')
+    region = topology.get('location', 'denmarkeast')
+    validate(topology, read(['vm', 'list-skus', '--resource-type', 'virtualMachines', '--location', region, '--size', 'Standard_B1s', '--all']), read(['vm', 'list-usage', '--location', region]))
+    print('B1s availability/Gen2/architecture and family/regional quota checks passed; free entitlement remains separately attested.')
 
 
 if __name__ == '__main__':
     try:
         main()
     except Exception:
-        print('AMD preflight failed closed; inspect approvals/quota privately. No resource or role changes attempted.', file=sys.stderr)
+        print('B1s preflight failed closed; inspect approvals/quota privately. No resource or role changes attempted.', file=sys.stderr)
         sys.exit(1)
