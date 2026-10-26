@@ -3,12 +3,12 @@
 set -eu
 export PATH=/run/current-system/sw/bin:/run/wrappers/bin:$PATH
 key=/var/lib/fleet-access/authorized_keys
-test -s "$key"
-test "$(stat -c '%u:%a' "$key")" = 0:644
+test -s "$key" || { echo "SSH bootstrap: missing public key" >&2; exit 1; }
+test "$(stat -c '%u:%a' "$key")" = 0:644 || { echo "SSH bootstrap: invalid key owner/mode" >&2; exit 1; }
 ssh-keygen -lf "$key" >/dev/null
 policy=$(sshd -T -f /etc/ssh/sshd_config)
 for setting in 'permitrootlogin no' 'passwordauthentication no' 'kbdinteractiveauthentication no' 'allowusers operator' 'authorizedkeysfile /var/lib/fleet-access/authorized_keys'; do
-  printf '%s\n' "$policy" | grep -Fx "$setting" >/dev/null
+  printf '%s\n' "$policy" | grep -Fx "$setting" >/dev/null || { echo "SSH bootstrap: required policy missing: $setting" >&2; exit 1; }
 done
 # /etc/systemd/system is Nix-managed. Only runtime drop-ins are written here;
 # cloud-init recreates them on reboot. The firewall service supplies ip6tables.
