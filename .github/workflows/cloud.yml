@@ -4,7 +4,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [oidc-check, image-transport, image-import, plan, apply, e2e]
+        options: [oidc-check, image-auth-check, image-transport, image-import, plan, apply, e2e]
         required: true
       oidc_environment:
         description: Identity to verify (oidc-check only)
@@ -59,6 +59,38 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Verify account and read fleet RG only
         run: python3 scripts/azure-oidc-check.py
+  image-auth-check:
+    if: github.ref == 'refs/heads/main' && inputs.operation == 'image-auth-check'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: fleet-apply
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      OIDC_CHECK_ENABLED: ${{ vars.OIDC_CHECK_ENABLED }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      FLEET_RESOURCE_GROUP: ${{ vars.FLEET_RESOURCE_GROUP }}
+    steps:
+      - name: Require approved federation setup
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          test "$OIDC_CHECK_ENABLED" = explicitly-approved
+          test -n "$FLEET_RESOURCE_GROUP"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac
+        with:
+          audience: api://AzureADTokenExchange
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Read-only storage and disk audience probe
+        run: |
+          python3 scripts/azure-oidc-check.py
+          python3 scripts/image-auth-check.py
   terraform:
     if: github.ref == 'refs/heads/main' && (inputs.operation == 'plan' || inputs.operation == 'apply')
     runs-on: ubuntu-24.04
