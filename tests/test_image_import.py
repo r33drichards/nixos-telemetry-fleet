@@ -144,3 +144,18 @@ class ImageImport(unittest.TestCase):
     def test_replication_failure_preserves_staging_and_blob(self):
         calls=self.import_case('replication')
         self.assertFalse(any('delete' in a for a in calls))
+
+    def test_api_failure_reports_only_allowlisted_operation_and_code(self):
+        result=mock.Mock(returncode=1, stdout='', stderr='ERROR: (AuthorizationFailed) https://private/?sig=SECRET token=SECRET')
+        with mock.patch.object(importer.subprocess, 'run', return_value=result), mock.patch('sys.stderr', new_callable=io.StringIO) as output:
+            with self.assertRaises(importer.SafeImportError) as raised:
+                importer.azure(['disk','create','--name','private-name'])
+        self.assertEqual(str(raised.exception), 'disk.create: AuthorizationFailed')
+        self.assertNotIn('SECRET', output.getvalue())
+        self.assertNotIn('private-name', output.getvalue())
+
+    def test_unknown_api_error_is_not_echoed(self):
+        result=mock.Mock(returncode=1, stdout='', stderr='sensitive raw output')
+        with mock.patch.object(importer.subprocess, 'run', return_value=result):
+            with self.assertRaisesRegex(importer.SafeImportError, '^disk.create: UnclassifiedCliError$'):
+                importer.azure(['disk','create'])

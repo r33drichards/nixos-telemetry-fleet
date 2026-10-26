@@ -23,7 +23,43 @@ def load(name):
 
 transport = load('transport-image')
 recipe = load('prepare-image-import')
-azure = transport.azure
+class SafeImportError(RuntimeError):
+    """Only fixed operation names and allowlisted classifications may enter this error."""
+
+OPERATIONS = [
+    ('account', 'show'), ('disk', 'list'), ('disk', 'create'),
+    ('disk', 'grant-access'), ('disk', 'revoke-access'), ('disk', 'show'), ('disk', 'delete'),
+    ('sig', 'image-definition', 'show'), ('sig', 'image-version', 'list'),
+    ('sig', 'image-version', 'create'), ('sig', 'image-version', 'wait'),
+    ('sig', 'image-version', 'show'), ('storage', 'container', 'show'),
+    ('storage', 'blob', 'show'), ('storage', 'blob', 'download'),
+    ('storage', 'blob', 'delete'), ('storage', 'blob', 'exists'),
+]
+ERROR_CODES = ('AuthorizationFailed', 'AuthorizationPermissionMismatch',
+    'AuthenticationFailed', 'InvalidParameter', 'InvalidParameterValue',
+    'InvalidResourceReference', 'ResourceNotFound', 'ResourceGroupNotFound',
+    'OperationNotAllowed', 'Conflict', 'BadRequest', 'InvalidHyperVGeneration')
+
+
+def azure(args):
+    operation = next(('.'.join(op) for op in OPERATIONS if tuple(args[:len(op)]) == op), None)
+    if operation is None:
+        raise SafeImportError('unrecognized-operation: Rejected')
+    print('Import API begin: ' + operation, file=sys.stderr, flush=True)
+    try:
+        result = subprocess.run(['az', *args, '--only-show-errors', '--output', 'json'],
+            capture_output=True, text=True, timeout=3600)
+    except subprocess.TimeoutExpired:
+        raise SafeImportError(operation + ': Timeout') from None
+    if result.returncode:
+        code = next((code for code in ERROR_CODES if '(' + code + ')' in result.stderr), 'UnclassifiedCliError')
+        raise SafeImportError(operation + ': ' + code)
+    try:
+        data = json.loads(result.stdout or '{}')
+    except (ValueError, TypeError):
+        raise SafeImportError(operation + ': InvalidJsonResponse') from None
+    print('Import API complete: ' + operation, file=sys.stderr, flush=True)
+    return data
 
 
 def verify_download(path, metadata, node):
@@ -47,7 +83,7 @@ def copy_to_disk(path, url, private_dir, tenant):
     result = subprocess.run(['azure-storage-azcopy', 'copy', str(path), url, '--blob-type', 'PageBlob', '--overwrite', 'true'],
         env=env, capture_output=True, text=True, timeout=2700)
     if result.returncode:
-        raise RuntimeError('AAD transfer failed; upload URL and logs withheld')
+        raise SafeImportError('azcopy.transfer: TransferFailed')
 
 
 def execute(p, node, directory):
@@ -75,9 +111,11 @@ def execute(p, node, directory):
     info = azure(['storage', 'blob', 'show', *common, '--name', blob])
     path = directory / f'{node}.vhd'
     azure(['storage', 'blob', 'download', *common, '--name', blob, '--file', str(path), '--overwrite', 'false'])
+    print('Import validation begin: downloaded-vhd', file=sys.stderr, flush=True)
     report = verify_download(path, info.get('metadata', {}), node)
     if report != p['artifact_reports'][node]:
         raise ValueError('Actual artifact differs from the privately approved report')
+    print('Import validation complete: downloaded-vhd', file=sys.stderr, flush=True)
     reports = p['artifact_reports']
     plan = recipe.prepare(p, reports)
     selected = next(n for n in plan['nodes'] if n['name'] == node)
@@ -142,6 +180,10 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
+    except Exception as error:
+        if isinstance(error, SafeImportError):
+            print('Import failure: ' + str(error), file=sys.stderr)
+        else:
+            print('Import failure: local validation or execution error; raw details withheld', file=sys.stderr)
         print('Image import failed closed. Inspect scoped disks/gallery/blobs before retry; persistent IAM is unchanged.', file=sys.stderr)
         sys.exit(1)
