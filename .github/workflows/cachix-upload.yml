@@ -1,0 +1,40 @@
+name: Upload reviewed node2 closure
+on:
+  workflow_dispatch:
+    inputs:
+      expected_revision:
+        description: Exact reviewed main commit
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: cachix-node2-upload
+  cancel-in-progress: false
+jobs:
+  upload:
+    if: github.ref == 'refs/heads/main'
+    environment: fleet-cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      EXPECTED_REVISION: ${{ inputs.expected_revision }}
+      UPLOAD_APPROVED: ${{ vars.CACHIX_UPLOAD_APPROVED }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+      - name: Build and validate reviewed runtime closure without credentials
+        id: prepare
+        run: |
+          bash scripts/cachix-upload.sh prepare
+          echo "spec_sha256=$(sha256sum deploy-result | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Upload only the validated runtime closure
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          EXPECTED_SPEC_SHA256: ${{ steps.prepare.outputs.spec_sha256 }}
+        run: bash scripts/cachix-upload.sh upload
