@@ -32,3 +32,5 @@ jobs:
         run: nix build -L .#checks.x86_64-linux.boot-ssh-comin
       - name: Verify cloud-init IPv6 SSH bootstrap and firewall reboot persistence
         run: nix build -L .#checks.x86_64-linux.cloud-init-ssh6
+      - name: Verify image-to-node2 leaf Comin activation preserves SSH and reboot
+        run: nix build -L .#checks.x86_64-linux.node2-comin-leaf
