@@ -29,6 +29,33 @@ def fixture():
     variables['approval'] = dict.fromkeys(('standard_unsigned_gen2','public_ipv6_ssh','free_compute_and_p6','quota_capacity_checked','state_and_roles','image_region_ready'), True)
     variables['approval'].update(monthly_ancillary_usd=3,evidence='private fixture evidence')
     plan=dict(applyable=True,complete=True,terraform_version='1.14.0',variables={k:{'value':v} for k,v in variables.items()},resource_changes=[dict(address=a,mode='managed',change=dict(actions=['create'],before=None,after=v)) for a,v in r.items()])
+    def ref(target, attribute='id'):
+        return {'references':[target+'[0].'+attribute,target+'[0]',target]}
+    configs={a.removesuffix('[0]'):{'address':a.removesuffix('[0]'),'expressions':{}} for a in m.ADDRESSES}
+    vm=configs['azurerm_linux_virtual_machine.node2']
+    vm['expressions']['network_interface_ids']=ref('azurerm_network_interface.node2')
+    vm['depends_on']=['terraform_data.approval','azurerm_network_interface_security_group_association.closed']
+    association=configs['azurerm_network_interface_security_group_association.closed']['expressions']
+    association['network_interface_id']=ref('azurerm_network_interface.node2')
+    association['network_security_group_id']=ref('azurerm_network_security_group.closed')
+    configs['azurerm_subnet.fleet']['expressions']['virtual_network_name']=ref('azurerm_virtual_network.fleet','name')
+    r['azurerm_subnet.fleet[0]']['virtual_network_name']='vnet-nixos-fleet-denmarkeast'
+    blocks=[]
+    for name in ['private-ipv4','public-ipv6']:
+        block={'name':{'constant_value':name},'subnet_id':ref('azurerm_subnet.fleet')}
+        if name=='public-ipv6':block['public_ip_address_id']=ref('azurerm_public_ip.node2')
+        blocks.append(block)
+    configs['azurerm_network_interface.node2']['expressions']['ip_configuration']=blocks
+    plan['configuration']={'root_module':{'resources':list(configs.values())}}
+    for change in plan['resource_changes']:
+        change['change']['after_unknown']={'id':True}
+        if change['address']=='azurerm_linux_virtual_machine.node2[0]':
+            change['change']['after']['network_interface_ids']=[None]
+            change['change']['after_unknown']['network_interface_ids']=[True]
+        if change['address']=='azurerm_network_interface_security_group_association.closed[0]':
+            change['change']['after_unknown'].update(network_interface_id=True,network_security_group_id=True)
+        if change['address']=='azurerm_network_interface.node2[0]':
+            change['change']['after_unknown']['ip_configuration']=[{'subnet_id':True},{'subnet_id':True,'public_ip_address_id':True}]
     return plan, bootstrap
 
 
@@ -86,3 +113,65 @@ class Review(unittest.TestCase):
     def test_missing_free_approval_rejected(self):
         self.plan['variables']['approval']['value']['free_compute_and_p6']=False
         with self.assertRaises(ValueError): self.run_review()
+
+    def test_multiline_two_distinct_keys_rejected(self):
+        first=self.plan['variables']['ssh_public_key']['value']
+        second='ssh-ed25519 '+base64.b64encode(b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20'+bytes([1])*32).decode()
+        for separator in ('\n','\r\n','\r'):
+            combined=first+separator+second
+            self.plan['variables']['ssh_public_key']['value']=combined
+            vm=self.resource('azurerm_linux_virtual_machine.node2[0]')
+            vm['admin_ssh_key'][0]['public_key']=combined
+            data=json.loads(base64.b64decode(vm['custom_data']).decode().split('\n',1)[1])
+            data['write_files'][0]['content']=combined+'\n'
+            vm['custom_data']=base64.b64encode(('#cloud-config\n'+json.dumps(data)).encode()).decode()
+            with self.assertRaises(ValueError):self.run_review()
+        self.assertEqual(m.fingerprint(first+' comment with spaces'),m.fingerprint(first))
+        with self.assertRaises(ValueError):m.fingerprint(first+'\n')
+    def test_foreign_known_links_rejected(self):
+        for address,field,value in [
+            ('azurerm_linux_virtual_machine.node2[0]','network_interface_ids',['/foreign/nic']),
+            ('azurerm_network_interface_security_group_association.closed[0]','network_interface_id','/foreign/nic'),
+            ('azurerm_network_interface_security_group_association.closed[0]','network_security_group_id','/foreign/nsg')]:
+            self.setUp();self.resource(address)[field]=value
+            change=next(c['change'] for c in self.plan['resource_changes'] if c['address']==address)
+            change['after_unknown'].pop(field,None)
+            with self.assertRaises(ValueError):self.run_review()
+    def test_foreign_unknown_expression_rejected(self):
+        configs=self.plan['configuration']['root_module']['resources']
+        vm=next(c for c in configs if c['address']=='azurerm_linux_virtual_machine.node2')
+        vm['expressions']['network_interface_ids']={'references':['azurerm_network_interface.foreign[0].id','azurerm_network_interface.foreign[0]','azurerm_network_interface.foreign']}
+        with self.assertRaises(ValueError):self.run_review()
+    def test_foreign_subnet_public_ip_and_missing_config_rejected(self):
+        for field in ('subnet_id','public_ip_address_id'):
+            self.setUp();self.resource('azurerm_network_interface.node2[0]')['ip_configuration'][1][field]='/foreign/id'
+            with self.assertRaises(ValueError):self.run_review()
+        self.setUp();self.plan.pop('configuration')
+        with self.assertRaises(KeyError):self.run_review()
+    def test_missing_nsg_dependency_rejected(self):
+        configs=self.plan['configuration']['root_module']['resources']
+        next(c for c in configs if c['address']=='azurerm_linux_virtual_machine.node2')['depends_on']=[]
+        with self.assertRaises(ValueError):self.run_review()
+
+    def test_known_ids_match_the_same_planned_graph(self):
+        prefix='/subscriptions/fixture/resourceGroups/fixture/providers/Microsoft.Network/'
+        ids={
+            'azurerm_virtual_network.fleet[0]':prefix+'virtualNetworks/vnet-nixos-fleet-denmarkeast',
+            'azurerm_subnet.fleet[0]':prefix+'virtualNetworks/vnet-nixos-fleet-denmarkeast/subnets/bare-hosts',
+            'azurerm_network_interface.node2[0]':prefix+'networkInterfaces/nic-nixos-node2',
+            'azurerm_public_ip.node2[0]':prefix+'publicIPAddresses/pip6-nixos-node2',
+            'azurerm_network_security_group.closed[0]':prefix+'networkSecurityGroups/nsg-nixos-node2-ssh6',
+        }
+        for c in self.plan['resource_changes']:
+            c['change']['after_unknown']={}
+            if c['address'] in ids:c['change']['after']['id']=ids[c['address']]
+        self.resource('azurerm_linux_virtual_machine.node2[0]')['network_interface_ids']=[ids['azurerm_network_interface.node2[0]']]
+        association=self.resource('azurerm_network_interface_security_group_association.closed[0]')
+        association.update(network_interface_id=ids['azurerm_network_interface.node2[0]'],network_security_group_id=ids['azurerm_network_security_group.closed[0]'])
+        for ip in self.resource('azurerm_network_interface.node2[0]')['ip_configuration']:
+            ip['subnet_id']=ids['azurerm_subnet.fleet[0]']
+            if ip['name']=='public-ipv6':ip['public_ip_address_id']=ids['azurerm_public_ip.node2[0]']
+        self.run_review()
+    def test_key_blob_type_mismatch_rejected(self):
+        bad='ssh-ed25519 '+base64.b64encode(b'not an ed25519 key blob').decode()
+        with self.assertRaises(ValueError):m.fingerprint(bad)

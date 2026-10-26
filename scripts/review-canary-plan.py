@@ -31,11 +31,82 @@ def equal_fields(value, expected):
 
 
 def fingerprint(key):
-    fields = key.strip().split()
-    require(len(fields) >= 2 and fields[0] == 'ssh-ed25519')
-    raw = base64.b64decode(fields[1], validate=True)
+    require(isinstance(key, str) and '\r' not in key and '\n' not in key)
+    record = re.fullmatch(r'ssh-ed25519[ \t]+([A-Za-z0-9+/]+={0,2})(?:[ \t]+[^\x00-\x1f\x7f]*)?', key.strip(' \t'))
+    require(record is not None)
+    raw = base64.b64decode(record.group(1), validate=True)
     require(raw[:19] == b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20' and len(raw) == 51)
     return 'SHA256:' + base64.b64encode(hashlib.sha256(raw).digest()).decode().rstrip('=')
+
+
+def validate_links(plan, resources, variables):
+    root = plan['configuration']['root_module']
+    require(not root.get('module_calls'))
+    configs = root['resources']
+    expected_addresses = {a.removesuffix('[0]') for a in ADDRESSES}
+    require(len(configs) == len(expected_addresses) and {c['address'] for c in configs} == expected_addresses)
+    expressions = {c['address']: c.get('expressions', {}) for c in configs}
+    changes = {c['address']: c['change'] for c in plan['resource_changes']}
+    prefix = '/subscriptions/' + variables['subscription_id'] + '/resourceGroups/' + variables['resource_group_name'] + '/providers/Microsoft.Network/'
+    ids = {
+        'azurerm_virtual_network.fleet': prefix + 'virtualNetworks/vnet-nixos-fleet-denmarkeast',
+        'azurerm_subnet.fleet': prefix + 'virtualNetworks/vnet-nixos-fleet-denmarkeast/subnets/bare-hosts',
+        'azurerm_network_interface.node2': prefix + 'networkInterfaces/nic-nixos-node2',
+        'azurerm_public_ip.node2': prefix + 'publicIPAddresses/pip6-nixos-node2',
+        'azurerm_network_security_group.closed': prefix + 'networkSecurityGroups/nsg-nixos-node2-ssh6',
+    }
+    def refs(expression, target, attribute='id'):
+        require(set(expression) == {'references'})
+        require(set(expression['references']) == {target+'[0].'+attribute, target+'[0]', target})
+    def scalar(value, unknown, expected):
+        if unknown is True:
+            require(value is None)
+        else:
+            require((unknown is None or unknown is False) and value == expected)
+    for target, expected in ids.items():
+        change = changes[target+'[0]']
+        scalar(change['after'].get('id'), change.get('after_unknown', {}).get('id'), expected)
+    def link(address, field, target, sequence=False):
+        change = changes[address+'[0]']
+        refs(expressions[address][field], target)
+        value = change['after'].get(field)
+        unknown = change.get('after_unknown', {}).get(field)
+        if sequence:
+            if unknown is True:
+                require(value is None)
+            else:
+                require(isinstance(value, list) and len(value) == 1)
+                if unknown is None: unknown = [False]
+                require(isinstance(unknown, list) and len(unknown) == 1)
+                scalar(value[0], unknown[0], ids[target])
+        else:
+            scalar(value, unknown, ids[target])
+    link('azurerm_linux_virtual_machine.node2', 'network_interface_ids', 'azurerm_network_interface.node2', True)
+    link('azurerm_network_interface_security_group_association.closed', 'network_interface_id', 'azurerm_network_interface.node2')
+    link('azurerm_network_interface_security_group_association.closed', 'network_security_group_id', 'azurerm_network_security_group.closed')
+    vm_config = next(c for c in configs if c['address'] == 'azurerm_linux_virtual_machine.node2')
+    require(set(vm_config.get('depends_on', [])) == {'terraform_data.approval', 'azurerm_network_interface_security_group_association.closed'})
+    subnet = resources['azurerm_subnet.fleet[0]']
+    require(subnet['virtual_network_name'] == 'vnet-nixos-fleet-denmarkeast')
+    refs(expressions['azurerm_subnet.fleet']['virtual_network_name'], 'azurerm_virtual_network.fleet', 'name')
+    change = changes['azurerm_network_interface.node2[0]']
+    blocks = expressions['azurerm_network_interface.node2']['ip_configuration']
+    require(isinstance(blocks, list) and len(blocks) == 2)
+    block_map = {b['name']['constant_value']: b for b in blocks}
+    require(set(block_map) == {'private-ipv4', 'public-ipv6'})
+    ips = change['after']['ip_configuration']
+    require(len(ips) == 2 and {ip['name'] for ip in ips} == set(block_map))
+    unknowns = change.get('after_unknown', {}).get('ip_configuration', [{}, {}])
+    require(isinstance(unknowns, list) and len(unknowns) == 2)
+    for ip, unknown in zip(ips, unknowns):
+        block = block_map[ip['name']]
+        refs(block['subnet_id'], 'azurerm_subnet.fleet')
+        scalar(ip.get('subnet_id'), unknown.get('subnet_id'), ids['azurerm_subnet.fleet'])
+        if ip['name'] == 'public-ipv6':
+            refs(block['public_ip_address_id'], 'azurerm_public_ip.node2')
+            scalar(ip.get('public_ip_address_id'), unknown.get('public_ip_address_id'), ids['azurerm_public_ip.node2'])
+        else:
+            require('public_ip_address_id' not in block and not ip.get('public_ip_address_id') and not unknown.get('public_ip_address_id'))
 
 
 def review(plan, binary, revision, run, bootstrap):
@@ -62,8 +133,8 @@ def review(plan, binary, revision, run, bootstrap):
     approval = variables['approval']
     require(all(approval.get(k) is True for k in ('standard_unsigned_gen2', 'public_ipv6_ssh', 'free_compute_and_p6', 'quota_capacity_checked', 'state_and_roles', 'image_region_ready')))
     require(0 <= approval['monthly_ancillary_usd'] <= 3 and bool(approval['evidence']))
-    key = variables['ssh_public_key'].strip()
-    key_fingerprint = fingerprint(key)
+    key_fingerprint = fingerprint(variables['ssh_public_key'])
+    key = variables['ssh_public_key'].strip(' \t')
     image = variables['image_version_id']
     expected_image = '/subscriptions/' + variables['subscription_id'] + '/resourceGroups/' + variables['resource_group_name'] + '/providers/Microsoft.Compute/galleries/gal_nixos_fleet/images/nixos-node2-x64/versions/0.1.0'
     require(image == expected_image)
@@ -115,6 +186,7 @@ def review(plan, binary, revision, run, bootstrap):
         equal_fields(ip, dict(private_ip_address_version='IPv4' if v4 else 'IPv6', private_ip_address_allocation='Dynamic', primary=v4))
         if v4:
             require(not ip.get('public_ip_address_id'))
+    validate_links(plan, resources, variables)
     # Values below are fixed labels or validated digests, never raw plan fields.
     return dict(schema=1, run_id=run, revision=revision, terraform_root=ROOT,
                 backend_key='fleet/amd-canary/terraform.tfstate', plan_sha256=hashlib.sha256(binary).hexdigest(),

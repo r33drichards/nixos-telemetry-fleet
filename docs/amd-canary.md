@@ -41,3 +41,5 @@ After private binary-plan storage succeeds, the plan job prints only fixed resou
 Read-only preflight errors now expose only fixed categories: SKU/usage timeout, read-denied, read-failed, invalid-response, validation or internal failure. SKU enumeration has a bounded 240-second timeout; usage remains 60 seconds. A timeout still prevents planning. This does not establish the cause of the earlier generic preflight failure and does not expand permissions.
 
 Native independent reads measured SKU enumeration at 124.45 seconds and returned quota values as decimal strings. The preflight normalizes only nonnegative integers or ASCII decimal digit strings; booleans, floats, negatives, whitespace and malformed values fail closed. These reads do not prove the GitHub identity has the same query permissions.
+
+The review gate accepts exactly one Ed25519 key record (optional single-line comment; CR/LF rejected before trimming). It validates the planned VM/NIC/NSG/subnet/public-IP graph using exact known IDs and Terraform configuration references plus unknown-value markers for computed IDs. Missing/foreign references or a missing NSG-association dependency fail closed.
