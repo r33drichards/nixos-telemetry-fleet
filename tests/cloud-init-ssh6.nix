@@ -45,7 +45,7 @@ pkgs.testers.runNixOSTest {
     client.succeed("printf '%s\\n' 'fd00:1::1 " + hostkey + "' > /root/known_hosts")
     ssh = "ssh -6 -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/known_hosts -o ConnectTimeout=3 -i /root/key "
     client.fail(ssh + "operator@fd00:1::1 true")
-    print(server.succeed("sshd -T -f /etc/ssh/sshd_config | grep -E '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|allowusers|authorizedkeysfile) '"))
+    print(server.succeed("sshd -T -f /etc/ssh/sshd_config | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|allowusers|authorizedkeysfile) '"))
     server.succeed("systemctl start fixture-cloud-per-boot.service")
     client.wait_until_succeeds(ssh + "operator@fd00:1::1 true", timeout=60)
     client.fail(ssh + "root@fd00:1::1 true")
