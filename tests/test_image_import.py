@@ -159,3 +159,38 @@ class ImageImport(unittest.TestCase):
         with mock.patch.object(importer.subprocess, 'run', return_value=result):
             with self.assertRaisesRegex(importer.SafeImportError, '^disk.create: UnclassifiedCliError$'):
                 importer.azure(['disk','create'])
+
+    def test_transfer_and_revoke_failures_are_both_reported_without_secrets(self):
+        def az(args):
+            if args[1]=='grant-access': return {'accessSas':'https://example.blob.core.windows.net/?sig=SECRET'}
+            raise importer.SafeImportError('disk.revoke-access: AuthorizationFailed')
+        with mock.patch.object(importer,'azure',side_effect=az), mock.patch.object(importer,'copy_to_disk',side_effect=RuntimeError('SECRET')), mock.patch('sys.stderr',new_callable=io.StringIO) as output:
+            import tempfile
+            with tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(importer.SafeImportError):
+                    importer.upload_and_revoke(pathlib.Path('fixture'),pathlib.Path(directory),'tenant',[],'disk')
+        self.assertIn('Upload phase failed: UnclassifiedExecutionError',output.getvalue())
+        self.assertIn('Upload access cleanup UNVERIFIED: disk.revoke-access: AuthorizationFailed',output.getvalue())
+        self.assertNotIn('SECRET',output.getvalue())
+
+    def test_successful_revoke_command_requires_inactive_disk_readback(self):
+        def az(args):
+            if args[1]=='grant-access': return {'accessSas':'https://example.blob.core.windows.net/upload'}
+            if args[1]=='show': return {'diskState':'ActiveUpload'}
+            return {}
+        with mock.patch.object(importer,'azure',side_effect=az), mock.patch.object(importer,'copy_to_disk'), mock.patch('sys.stderr',new_callable=io.StringIO):
+            import tempfile
+            with tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(importer.SafeImportError,'UploadAccessStillActiveOrUnknown'):
+                    importer.upload_and_revoke(pathlib.Path('fixture'),pathlib.Path(directory),'tenant',[],'disk')
+
+    def test_missing_azcopy_is_reported_without_upload_url(self):
+        with mock.patch.object(importer.subprocess,'run',side_effect=FileNotFoundError('SECRET')):
+            with self.assertRaisesRegex(importer.SafeImportError,'^azcopy.transfer: ExecutableMissing$'):
+                importer.copy_to_disk(pathlib.Path('fixture'),'https://example.blob.core.windows.net/?sig=SECRET',pathlib.Path('/tmp'),'tenant')
+
+    def test_partial_transfer_failure_is_not_treated_as_success(self):
+        result=mock.Mock(returncode=1,stdout='SECRET',stderr='SECRET')
+        with mock.patch.object(importer.subprocess,'run',return_value=result):
+            with self.assertRaisesRegex(importer.SafeImportError,'^azcopy.transfer: TransferFailed$'):
+                importer.copy_to_disk(pathlib.Path('fixture'),'https://example.blob.core.windows.net/?sig=SECRET',pathlib.Path('/tmp'),'tenant')
