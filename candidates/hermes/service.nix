@@ -19,7 +19,7 @@ let cfg = config.fleet.hermes; in {
       wants = [ "network-online.target" ];
       after = [ "network-online.target" ];
       unitConfig = {
-        ConditionPathExists = [ "/var/lib/fleet-access/hermes-irc-policy-qualified" "/var/lib/fleet-access/hermes-approved" "/var/lib/fleet-access/hermes.env" "/var/lib/fleet-access/hermes-config.json" ];
+        ConditionPathExists = [ "/var/lib/fleet-access/hermes-irc-policy-qualified" "/var/lib/fleet-access/hermes-approved" "/var/lib/fleet-access/hermes.env" "/var/lib/fleet-access/hermes-config.json" "/var/lib/hermes/.hermes/auth.json" ];
         StartLimitIntervalSec = 300;
         StartLimitBurst = 3;
       };

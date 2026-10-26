@@ -47,26 +47,27 @@ server; denied nick/DM and channel policy; reconnect after tunnel loss; hosted
 model mock (no paid request); memory/CPU measurement under one concurrent
 session; reboot/SSH/Cachix health and rollback. None is claimed run yet.
 
-## Proposed tunnel integration (not approved or enabled)
+## InspIRCd controller integration
 
-A separate Railway service would initiate IPv6 SSH to node2 and request ONLY
-`127.0.0.1:16667` on node2, forwarding to the existing IRC service on Railway's
-private network, port7667. The existing unrelated OpenClaw tunnel stays untouched.
-The draft `tunnel.nix` defines a separate account, remote-forward-only SSH,
+The separately managed InspIRCd desired-state controller initiates IPv6 SSH
+and requests ONLY node2 `127.0.0.1:16667`, forwarding to the IRC container's
+`127.0.0.1:6667`. Port7667 belongs to the unrelated OpenClaw authenticated
+listener and must stay untouched. Do not create a separate Railway service.
+
+The controller profile uses an absolute identityfile and knownhostsfile with
+strict host pinning. Its owner supplies the public key; this repository never
+generates a live private key. Module IPv6 fix701e910 passed its owner's IPv4/
+IPv6 tests; runtime rollout is separate and not claimed by fleet CI.
+
+The node module defines a separate account, remote-forward-only SSH,
 PermitListen127.0.0.1:16667, GatewayPortsno, MaxSessions0 and no PTY/agent/X11/
-streamlocal forwarding. Its host-local public authorized-key file is provisioned
-only after approval. The Railway client must pin node2's host key and keep its
-private key outside Git. Server-side PermitListen constrains the node2 listener;
-it cannot constrain the destination chosen on the remote Railway side.
+streamlocal forwarding. Server-side PermitListen constrains the node listener;
+it cannot constrain the destination chosen on the controller side.
 
-Railway IPv6 outbound support and the entire forwarding path need a real test.
-Estimated additional service cost about $0.76/month plus egress is NOT approved
-and is distinct from Azure's existing budget. Runtime endpoint inventory is not
-included in the public candidate. Determine whether the internal IRC port speaks
-TLS: current Hermes validator requires TLS and must not be loosened silently.
-A plaintext IRC segment inside the private network needs explicit acceptance
-of the tunnel/security boundary. Hosted model HTTPS egress remains separate.
-
+The controller preserves IRC transport and does not terminate TLS. Qualify IRC
+TLS/auth and preserve certificate hostname verification; the current validator
+requires TLS. No silent plaintext exception or paid-network fallback is made.
+Hosted-model and cache reachability need separate checks on the IPv6-only node.
 
 ## Confirmed intake policy and limitation
 
@@ -108,3 +109,20 @@ plugin, not merely a patched source fixture. It does not prove live IRC,
 OAuth, memory fit, or node2 boot. Keep this separate from the already approved
 Cachix upload run and existing deployment spec. No cache push or activation is
 part of these commands.
+
+
+## Integrated build-only candidate
+
+Root outputs `node2-hermes`, `node2-hermes-deploy`, and
+`node2-hermes-bootstrap` prepare the actual Azure system, deploy specification
+and bootstrap assets separately from the existing node2-cachix target. The
+Hermes job builds them and runs a KVM transport/bootstrap/reboot fixture.
+The VM fixture uses a stub model binary solely to test service gates; the
+separate Azure contract builds the real native Hermes package. Neither test
+logs in to a model or reaches the live IRC server. No output is activated.
+
+`lib.mkNode2Hermes { tunnelPublicKey = null; }` builds without a live key;
+null means later host-local delivery. A supplied public key must be one bare
+Ed25519 record with no comment/options/newlines. No private key is accepted.
+The compatibility hook replaces the existing per-boot firewall check only
+through a separately reviewed privileged bootstrap, never Terraform custom_data.

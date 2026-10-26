@@ -1,7 +1,51 @@
 {
   description = "Two-node Azure fleet with retained inactive node1 template: IPv6, WireGuard, Comin and private node metrics";
   inputs.common.url = "path:./common";
-  outputs = { self, common }: {
+  inputs.hermes.url = "github:NousResearch/hermes-agent/05d7b5af1c42d524762c7ffce991c1fe1aa2adb1";
+  outputs = { self, common, hermes }:
+  let
+    pkgs = common.inputs.nixpkgs.legacyPackages.x86_64-linux;
+    hermesPackage = import ./candidates/hermes/package.nix {
+      pkgs = hermes.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      inherit hermes;
+    };
+    sshPolicy = pkgs.writeShellScriptBin "fleet-check-ssh-policy"
+      (builtins.readFile ./candidates/hermes/bootstrap/check-ssh-policy.sh);
+    hermesHealth = pkgs.writeShellApplication {
+      name = "node2-health";
+      runtimeInputs = [ pkgs.systemd pkgs.openssh pkgs.gnugrep pkgs.gawk pkgs.coreutils pkgs.iproute2 sshPolicy ];
+      text = builtins.readFile ./deploy/node2-hermes-health.sh;
+    };
+    mkHermesNode = { tunnelPublicKey ? null }: common.lib.mkNode {
+      revision = self.rev or null;
+      system = "x86_64-linux"; name = "node2"; address = "fd42:6e69:7800::2";
+      extraModules = [ ./deploy/node2-hermes.nix ({ ... }: {
+        fleet.hermes.package = hermesPackage;
+        fleet.hermesTunnel.publicKey = tunnelPublicKey;
+      }) ];
+    };
+  in {
+    lib.mkNode2Hermes = mkHermesNode;
+    nixosConfigurations.node2-hermes = mkHermesNode {};
+    checks.x86_64-linux.hermes-tunnel = import ./tests/hermes-tunnel.nix {
+      inherit pkgs;
+      comin = common.inputs.comin;
+    };
+    checks.x86_64-linux.node2-hermes-contract = import ./tests/hermes-contract.nix {
+      inherit pkgs;
+      candidate = self.nixosConfigurations.node2-hermes.config;
+    };
+    packages.x86_64-linux.node2-hermes-deploy = pkgs.writeText "deploy.json" (builtins.toJSON {
+      agents.node2 = "${self.nixosConfigurations.node2-hermes.config.system.build.toplevel}";
+      rollbackScript.x86_64-linux = "${hermesHealth}/bin/node2-health";
+    });
+    packages.x86_64-linux.node2-hermes-bootstrap = pkgs.runCommand "node2-hermes-bootstrap-assets" {} ''
+      mkdir -p "$out"
+      cp ${./candidates/hermes/bootstrap/check-ssh-policy.sh} "$out/check-ssh-policy.sh"
+      cp ${./candidates/hermes/bootstrap/ssh6-per-boot.sh} "$out/fleet-ssh6"
+      ln -s ${hermesHealth}/bin/node2-health "$out/health"
+    '';
+
     nixosConfigurations.node2-cachix = common.lib.mkNode {
       revision = self.rev or null;
       system = "x86_64-linux";
