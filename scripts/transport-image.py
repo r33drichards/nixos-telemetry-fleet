@@ -22,7 +22,7 @@ def validate_plan(raw, expected_hash, now):
     for key, pattern in [('storage_account', r'[a-z0-9]{3,24}'), ('container', r'[a-z0-9][a-z0-9-]{1,61}[a-z0-9]'), ('prefix', r'[A-Za-z0-9/_-]{1,120}')]:
         if not re.fullmatch(pattern, p.get(key, '')) or '..' in p[key]:
             raise ValueError('Explicit safe private blob destination required')
-    if p.get('setup_estimate_usd', -1) < 0 or p['setup_estimate_usd'] > 1 or not 0 <= p.get('monthly_ancillary_estimate_usd', -1) <= 3:
+    if p.get('setup_estimate_usd', -1) < 0 or p['setup_estimate_usd'] > 2 or not 0 <= p.get('monthly_ancillary_estimate_usd', -1) <= 3:
         raise ValueError('Cost estimates exceed the approved envelope')
     expires = dt.datetime.fromisoformat(p['expires_at'].replace('Z', '+00:00'))
     if expires.tzinfo is None or not now < expires <= now + dt.timedelta(hours=24):

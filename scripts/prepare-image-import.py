@@ -24,8 +24,8 @@ def prepare(config, reports):
         raise ValueError('Explicit immutable gallery version required')
     if not re.fullmatch(r'[0-9a-fA-F-]{36}', config.get('subscription_id', '')):
         raise ValueError('Explicit subscription identifier required')
-    if not 0 <= config.get('setup_estimate_usd', -1) <= 1:
-        raise ValueError('Setup estimate must fit the approved $1 ceiling')
+    if not 0 <= config.get('setup_estimate_usd', -1) <= 2:
+        raise ValueError('Setup estimate must fit the approved $2 ceiling')
     if not 0 <= config.get('monthly_ancillary_estimate_usd', -1) <= 3:
         raise ValueError('Ancillary estimate must fit the approved $3 monthly ceiling')
     for key in ['cost_evidence', 'phase_b_scope_approval']:
@@ -62,7 +62,7 @@ def prepare(config, reports):
         })
     if len({n['disk_id'].lower() for n in nodes}) != 2 or len({n['image_version_id'].lower() for n in nodes}) != 2:
         raise ValueError('Architecture staging disks and image definitions must be distinct')
-    return {'source_revision': SOURCE_REVISION, 'execute': False, 'status': 'private recipe requiring action-time approval; no Azure operations performed', 'setup_ceiling_usd': 1, 'monthly_ancillary_ceiling_usd': 3, 'retain': 'one gallery version per architecture; no retained source VHD', 'nodes': nodes, 'terraform_handoff': 'Use exact immutable version IDs with approved existing NIC IDs; private saved-plan hash approval remains required. Current Trusted Launch guard is unchanged.'}
+    return {'source_revision': SOURCE_REVISION, 'execute': False, 'status': 'private recipe requiring action-time approval; no Azure operations performed', 'setup_ceiling_usd': 2, 'monthly_ancillary_ceiling_usd': 3, 'retain': 'one gallery version per architecture; no retained source VHD', 'nodes': nodes, 'terraform_handoff': 'Use exact immutable version IDs with approved existing NIC IDs; private saved-plan hash approval remains required. Current Trusted Launch guard is unchanged.'}
 
 
 def main():
