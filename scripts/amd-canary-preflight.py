@@ -26,6 +26,8 @@ def validate(topology, skus, usage):
         raise ValueError('Explicit IPv6 SSH canary approvals required')
     if not 0 <= a.get('monthly_ancillary_usd', -1) <= 3 or not a.get('evidence'):
         raise ValueError('Cost evidence required')
+    if topology.get('shared_default_outbound_ipv4', False) is not False and (topology.get('shared_default_outbound_ipv4') is not True or a.get('shared_default_outbound_ipv4') is not True):
+        raise ValueError('Shared outbound trial requires explicit approval')
     region = topology.get('location', 'denmarkeast')
     if region not in ('denmarkeast', 'westus', 'westus2', 'westus3', 'centralus', 'eastus', 'eastus2', 'northcentralus', 'southcentralus', 'westcentralus'):
         raise ValueError('Unapproved region')

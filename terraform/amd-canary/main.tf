@@ -9,16 +9,20 @@ variable "location" {
     error_message = "Select Denmark East or a reviewed US Azure region; quota, free entitlement and image replication must be verified there."
   }
 }
+variable "shared_default_outbound_ipv4" {
+  type    = bool
+  default = false
+}
 variable "subscription_id" { type = string }
 variable "resource_group_name" { type = string }
 variable "image_version_id" { type = string }
 variable "ssh_public_key" { type = string }
 variable "approval" {
-  type    = object({ standard_unsigned_gen2 = bool, public_ipv6_ssh = bool, free_compute_and_p6 = bool, quota_capacity_checked = bool, state_and_roles = bool, image_region_ready = bool, monthly_ancillary_usd = number, evidence = string })
+  type    = object({ standard_unsigned_gen2 = bool, public_ipv6_ssh = bool, free_compute_and_p6 = bool, quota_capacity_checked = bool, state_and_roles = bool, image_region_ready = bool, monthly_ancillary_usd = number, evidence = string, shared_default_outbound_ipv4 = optional(bool, false) })
   default = { standard_unsigned_gen2 = false, public_ipv6_ssh = false, free_compute_and_p6 = false, quota_capacity_checked = false, state_and_roles = false, image_region_ready = false, monthly_ancillary_usd = 0, evidence = "" }
 }
 locals {
-  approved = var.approval.standard_unsigned_gen2 && var.approval.public_ipv6_ssh && var.approval.free_compute_and_p6 && var.approval.quota_capacity_checked && var.approval.state_and_roles && var.approval.image_region_ready && var.approval.monthly_ancillary_usd >= 0 && var.approval.monthly_ancillary_usd <= 3 && length(var.approval.evidence) > 0
+  approved = var.approval.standard_unsigned_gen2 && var.approval.public_ipv6_ssh && var.approval.free_compute_and_p6 && var.approval.quota_capacity_checked && var.approval.state_and_roles && var.approval.image_region_ready && var.approval.monthly_ancillary_usd >= 0 && var.approval.monthly_ancillary_usd <= 3 && length(var.approval.evidence) > 0 && (!var.shared_default_outbound_ipv4 || var.approval.shared_default_outbound_ipv4)
   create   = var.enabled && local.approved
 }
 resource "terraform_data" "approval" {
@@ -43,7 +47,7 @@ resource "azurerm_subnet" "fleet" {
   resource_group_name             = var.resource_group_name
   virtual_network_name            = azurerm_virtual_network.fleet[0].name
   address_prefixes                = ["10.78.1.0/24", "fd42:6e69:7800:1::/64"]
-  default_outbound_access_enabled = false
+  default_outbound_access_enabled = var.shared_default_outbound_ipv4
 }
 resource "azurerm_network_security_group" "closed" {
   count               = local.create ? 1 : 0
