@@ -49,10 +49,14 @@ pkgs.testers.runNixOSTest {
     server.succeed("systemctl start fixture-cloud-per-boot.service")
     hostkey = server.succeed("cat /etc/ssh/ssh_host_ed25519_key.pub").strip()
     client.succeed("printf '%s\\n' 'fd00:1::1 " + hostkey + "' > /root/known_hosts; echo transport-ok > /tmp/probe")
-    common = "ssh -6 -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/known_hosts -o ConnectTimeout=3 "
+    # Numeric IPv6 destination fixes SSH transport to IPv6. Do not use -6:
+    # OpenSSH also applies it to the IPv4 loopback forwarding destination.
+    common = "ssh -o AddressFamily=any -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/known_hosts -o ConnectTimeout=3 "
     operator = common + "-i /root/operator operator@fd00:1::1 "
     tunnel = common + "-i /root/tunnel "
-    client.wait_until_succeeds(operator + "true")
+    client.wait_until_succeeds(operator + "true", timeout=60)
+    connection = client.succeed(operator + "'printf %s \"$SSH_CONNECTION\"'").split()
+    assert connection[0] == "fd00:1::2" and connection[2] == "fd00:1::1", connection
     client.fail(tunnel + "hermes-tunnel@fd00:1::1 true")
     client.fail(tunnel + "-tt hermes-tunnel@fd00:1::1 true")
     # -W requires a local/direct-tcpip channel, forbidden even when SSH auth succeeds.
@@ -61,7 +65,7 @@ pkgs.testers.runNixOSTest {
         client.fail(tunnel + "-o ExitOnForwardFailure=yes -N -R " + listen + ":127.0.0.1:6667 hermes-tunnel@fd00:1::1")
     forward = tunnel + "-o ExitOnForwardFailure=yes -fN -R 127.0.0.1:16667:127.0.0.1:6667 hermes-tunnel@fd00:1::1"
     client.succeed(forward)
-    server.wait_until_succeeds("curl --fail --max-time 3 http://127.0.0.1:16667/probe | grep -Fx transport-ok")
+    server.wait_until_succeeds("curl --fail --max-time 3 http://127.0.0.1:16667/probe | grep -Fx transport-ok", timeout=60)
     server.succeed("ss -lnt '( sport = :16667 )' | grep -F 127.0.0.1:16667")
     server.fail("ss -lnt '( sport = :16667 )' | grep -E '(0.0.0.0|\\[::\\]|\\*):16667'")
     server.fail("systemctl is-active hermes-irc")
@@ -70,9 +74,11 @@ pkgs.testers.runNixOSTest {
     server.shutdown()
     server.start()
     server.wait_for_unit("sshd.service")
-    client.wait_until_succeeds(operator + "true")
+    client.wait_until_succeeds(operator + "true", timeout=60)
+    connection = client.succeed(operator + "'printf %s \"$SSH_CONNECTION\"'").split()
+    assert connection[0] == "fd00:1::2" and connection[2] == "fd00:1::1", connection
     client.succeed(forward)
-    server.wait_until_succeeds("curl --fail --max-time 3 http://127.0.0.1:16667/probe | grep -Fx transport-ok")
+    server.wait_until_succeeds("curl --fail --max-time 3 http://127.0.0.1:16667/probe | grep -Fx transport-ok", timeout=60)
     server.fail("systemctl is-active hermes-irc")
     server.fail("systemctl is-active comin")
   '';
