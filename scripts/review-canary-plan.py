@@ -220,9 +220,73 @@ def review(plan, binary, revision, run, bootstrap):
                 cloud_init='exact reviewed public-key/per-boot payload')
 
 
+def safe_diagnostics(plan, error):
+    """Fixed labels, booleans and counts only, even for adversarial plan data."""
+    def flag(value):
+        return value if type(value) is bool else 'missing-or-invalid'
+    result = {'category': 'contract-rejection' if type(error) is ValueError else 'schema-or-runtime-rejection'}
+    # Source locations identify the failed assertion without exception text,
+    # dictionary keys, source lines or any plan-derived field names.
+    trace = error.__traceback__
+    lines = []
+    while trace:
+        if trace.tb_frame.f_code.co_filename == __file__:
+            lines.append(trace.tb_lineno)
+        trace = trace.tb_next
+    result['reviewer_lines'] = lines[-4:]
+    if not isinstance(plan, dict):
+        return result
+    variables = plan.get('variables', {})
+    if not isinstance(variables, dict):
+        return result
+    def variable(name):
+        entry = variables.get(name, {})
+        return entry.get('value') if isinstance(entry, dict) else None
+    result['trial_enabled'] = flag(variable('shared_default_outbound_ipv4'))
+    approval = variable('approval')
+    result['trial_approved'] = flag(approval.get('shared_default_outbound_ipv4') if isinstance(approval, dict) else None)
+    result['applyable'] = flag(plan.get('applyable'))
+    result['complete'] = flag(plan.get('complete'))
+    result['has_drift'] = bool(plan.get('resource_drift'))
+    counts = {action: 0 for action in ('create', 'update', 'delete', 'no-op', 'other')}
+    changes = plan.get('resource_changes', [])
+    if not isinstance(changes, list):
+        return result
+    known = []
+    fields = ('default_outbound_access_enabled', 'input', 'output', 'triggers_replace',
+              'custom_data', 'admin_ssh_key', 'network_interface_ids', 'ip_configuration',
+              'security_rule', 'address_prefixes', 'id')
+    for resource in changes:
+        if not isinstance(resource, dict):
+            counts['other'] += 1
+            continue
+        change = resource.get('change', {})
+        if not isinstance(change, dict):
+            counts['other'] += 1
+            continue
+        actions = change.get('actions')
+        action = next((a for a in counts if actions == [a]), 'other')
+        counts[action] += 1
+        address = resource.get('address')
+        if isinstance(address, str) and address in ADDRESSES:
+            before, after = change.get('before'), change.get('after')
+            changed_fields = []
+            if isinstance(before, dict) and isinstance(after, dict):
+                changed_fields = [f for f in fields if before.get(f) != after.get(f)]
+            known.append({'address': address, 'action': action, 'changed_fields': changed_fields})
+    result['actions'] = counts
+    result['known_resources'] = known
+    return result
+
+
 def main():
     plan_path, binary_path, bootstrap_path = map(pathlib.Path, sys.argv[1:])
-    result = review(json.loads(plan_path.read_text()), binary_path.read_bytes(), os.environ['GITHUB_SHA'], os.environ['GITHUB_RUN_ID'], bootstrap_path.read_text())
+    plan = json.loads(plan_path.read_text())
+    try:
+        result = review(plan, binary_path.read_bytes(), os.environ['GITHUB_SHA'], os.environ['GITHUB_RUN_ID'], bootstrap_path.read_text())
+    except Exception as error:
+        print('Canary rejection diagnostics: ' + json.dumps(safe_diagnostics(plan, error), sort_keys=True), file=sys.stderr)
+        raise
     print(json.dumps(result, sort_keys=True))
 
 
