@@ -35,6 +35,16 @@ pkgs.testers.runNixOSTest {
     virtualisation.memorySize = 512;
   };
   testScript = ''
+    def check_ssh(command, expected_status):
+        # ConnectTimeout bounds the handshake only. Bound the complete client
+        # and driver capture, and never count a timeout as a negative-test pass.
+        status, output = client.execute(command, timeout=40)
+        if status != expected_status:
+            print(output)
+            print(client.succeed("tail -n 80 /tmp/fixture-ssh.log", timeout=10))
+            print(server.succeed("journalctl -u sshd -n 80 --no-pager", timeout=10))
+        assert status == expected_status, (status, expected_status, output)
+
     start_all()
     server.wait_for_unit("sshd.service")
     client.wait_for_unit("multi-user.target")
@@ -43,16 +53,17 @@ pkgs.testers.runNixOSTest {
     server.succeed("printf '%s\\n' '" + pub + "' > /var/lib/fleet-access/authorized_keys; chmod 644 /var/lib/fleet-access/authorized_keys")
     hostkey = server.succeed("cat /etc/ssh/ssh_host_ed25519_key.pub").strip()
     client.succeed("printf '%s\\n' 'fd00:1::1 " + hostkey + "' > /root/known_hosts")
-    ssh = "ssh -6 -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/known_hosts -o ConnectTimeout=3 -i /root/key "
-    client.fail(ssh + "operator@fd00:1::1 true")
+    # This noninteractive probe must not consume the test-driver shell stdin.
+    ssh = "timeout --kill-after=5s 30s ssh -n -vv -E /tmp/fixture-ssh.log -6 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/known_hosts -o ConnectTimeout=3 -i /root/key "
+    check_ssh(ssh + "operator@fd00:1::1 true", 255)
     print(server.succeed("sshd -T -f /etc/ssh/sshd_config | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|allowusers|authorizedkeysfile) '"))
     server.succeed("systemctl start fixture-cloud-per-boot.service")
     client.wait_until_succeeds(ssh + "operator@fd00:1::1 true", timeout=60)
-    client.fail(ssh + "root@fd00:1::1 true")
-    client.fail(ssh.replace('/root/key', '/root/wrong') + "operator@fd00:1::1 true")
+    check_ssh(ssh + "root@fd00:1::1 true", 255)
+    check_ssh(ssh.replace('/root/key', '/root/wrong') + "operator@fd00:1::1 true", 255)
     for operation in ["restart", "reload"]:
         server.succeed("systemctl " + operation + " firewall")
-        client.succeed(ssh + "operator@fd00:1::1 true")
+        check_ssh(ssh + "operator@fd00:1::1 true", 0)
     server.shutdown()
     server.start()
     server.wait_for_unit("sshd.service")
