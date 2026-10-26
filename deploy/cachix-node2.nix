@@ -17,7 +17,7 @@
   nix.settings = {
     extra-substituters = [ "https://r33drichards-nixos-fleet.cachix.org" ];
     extra-trusted-public-keys = [ "r33drichards-nixos-fleet.cachix.org-1:olHCUKLC5yhwGhf0y+ZI8LbfQ6L/ZQwtN2vsjIAgV9M=" ];
-    max-jobs = 0;
+    max-jobs = lib.mkForce 0;
     fallback = false;
     require-sigs = true;
   };
