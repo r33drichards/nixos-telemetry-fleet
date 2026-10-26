@@ -219,3 +219,29 @@ class ImageImport(unittest.TestCase):
         with self.assertRaises(ValueError):self.validate(plan)
         plan['setup_estimate_usd']=2;plan['monthly_ancillary_estimate_usd']=3.01
         with self.assertRaises(ValueError):self.validate(plan)
+
+    def test_real_upload_branch_accepts_current_and_legacy_grant_response(self):
+        import tempfile
+        for field in ('accessSAS','accessSas'):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                def az(args):
+                    if args[1]=='grant-access':return {field:'https://md-fixture.blob.core.windows.net/upload?sig=FAKE'}
+                    if args[1]=='show':return {'diskState':'Unattached'}
+                    return {}
+                with mock.patch.object(importer,'azure',side_effect=az), mock.patch.object(importer.subprocess,'run',return_value=mock.Mock(returncode=0)) as run, mock.patch('sys.stderr',new_callable=io.StringIO) as output:
+                    importer.upload_and_revoke(pathlib.Path(directory)/'fixture.vhd',pathlib.Path(directory),'fixture-tenant',[],'fixture-disk')
+                self.assertEqual(run.call_count,1)
+                self.assertEqual(run.call_args.args[0][:2],['azure-storage-azcopy','copy'])
+                self.assertEqual(run.call_args.kwargs['env']['AZCOPY_AUTO_LOGIN_TYPE'],'AZCLI')
+                self.assertNotIn('sig=',output.getvalue())
+
+    def test_grant_response_rejects_missing_malformed_and_conflicting_urls(self):
+        for response in (None, {}, {'accessSAS':None}, {'accessSAS':''}, {'accessSAS':'one','accessSas':'two'}):
+            with self.subTest(response=response), self.assertRaises(importer.SafeImportError):
+                importer.grant_upload_url(response)
+
+    def test_grant_response_url_still_requires_approved_azure_endpoint(self):
+        with mock.patch.object(importer.subprocess,'run') as run:
+            with self.assertRaisesRegex(importer.SafeImportError,'UnexpectedUploadEndpoint'):
+                importer.copy_to_disk(pathlib.Path('fixture'),importer.grant_upload_url({'accessSAS':'https://example.invalid/?sig=FAKE'}),pathlib.Path('/tmp'),'fixture')
+        run.assert_not_called()

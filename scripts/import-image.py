@@ -109,7 +109,7 @@ def validate_selected_node(plan, node):
 def copy_to_disk(path, url, private_dir, tenant):
     parsed = urlparse(url)
     if parsed.scheme != 'https' or not parsed.hostname or not parsed.hostname.endswith(('.blob.core.windows.net', '.blob.storage.azure.net')):
-        raise ValueError('Unexpected managed-disk upload endpoint')
+        raise SafeImportError('azcopy.transfer: UnexpectedUploadEndpoint')
     env = dict(os.environ, AZCOPY_AUTO_LOGIN_TYPE='AZCLI', AZCOPY_TENANT_ID=tenant,
         AZCOPY_LOG_LOCATION=str(private_dir), AZCOPY_JOB_PLAN_LOCATION=str(private_dir))
     try:
@@ -124,11 +124,23 @@ def copy_to_disk(path, url, private_dir, tenant):
         raise SafeImportError('azcopy.transfer: ' + code)
 
 
+def grant_upload_url(response):
+    # Current REST/AAZ uses accessSAS; older CLI serialization used accessSas.
+    if not isinstance(response, dict):
+        raise SafeImportError('disk.grant-access: InvalidResponseShape')
+    values = [response[key] for key in ('accessSAS', 'accessSas') if key in response]
+    if not values or any(not isinstance(value, str) or not value for value in values):
+        raise SafeImportError('disk.grant-access: MissingUploadUrl')
+    if len(set(values)) != 1:
+        raise SafeImportError('disk.grant-access: ConflictingUploadUrls')
+    return values[0]
+
+
 def upload_and_revoke(path, directory, tenant, base, disk_name):
     try:
         access = azure(['disk', 'grant-access', *base, '--name', disk_name, '--access-level', 'Write', '--duration-in-seconds', '3600'])
         with tempfile.TemporaryDirectory(prefix='private-azcopy-', dir=directory) as private_logs:
-            copy_to_disk(path, access['accessSas'], pathlib.Path(private_logs), tenant)
+            copy_to_disk(path, grant_upload_url(access), pathlib.Path(private_logs), tenant)
     except Exception as error:
         detail = str(error) if isinstance(error, SafeImportError) else 'UnclassifiedExecutionError'
         print('Upload phase failed: ' + detail, file=sys.stderr, flush=True)
