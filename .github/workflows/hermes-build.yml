@@ -8,6 +8,8 @@ on:
       - 'flake.lock'
       - 'deploy/node2-hermes*'
       - 'tests/hermes-*'
+      - 'tests/test_structure.py'
+      - 'Makefile'
 permissions:
   contents: read
 concurrency:

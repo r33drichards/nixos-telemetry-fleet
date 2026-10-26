@@ -3,9 +3,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 class Structure(unittest.TestCase):
     def test_four_locks_pin_same_external_revisions(self):
         locks=[json.loads(p.read_text()) for p in [ROOT/'flake.lock',*[ROOT/f'nodes/node{i}/flake.lock' for i in range(1,4)]]]
-        pins=[{n['locked']['repo']:n['locked']['rev'] for n in lock['nodes'].values() if n.get('locked',{}).get('type')=='github'} for lock in locks]
-        self.assertTrue(all(p==pins[0] for p in pins))
-        self.assertEqual(pins[0]['comin'],'1399adecc682e557bc3ee914d929f8e20391a148')
+        # Compare full records by graph node, so distinct nixpkgs pins cannot
+        # overwrite each other through a dictionary keyed only by repo name.
+        github=lambda lock: {name:node['locked'] for name,node in lock['nodes'].items() if node.get('locked',{}).get('type')=='github'}
+        root, *leaves = map(github, locks)
+        self.assertTrue(all(p==leaves[0] for p in leaves))
+        candidate=github(json.loads((ROOT/'candidates/hermes/flake.lock').read_text()))
+        hermes={('hermes' if name=='hermes' else 'hermes-'+name):locked for name,locked in candidate.items()}
+        self.assertFalse(set(leaves[0]) & set(hermes))
+        self.assertEqual(root, {**leaves[0], **hermes})
+        self.assertEqual(root['comin']['rev'],'1399adecc682e557bc3ee914d929f8e20391a148')
+        self.assertEqual(root['hermes']['rev'],'05d7b5af1c42d524762c7ffce991c1fe1aa2adb1')
     def test_three_leaf_configs_disabled(self):
         for i in range(1,4):
             self.assertIn(f'nixosConfigurations.node{i}',(ROOT/f'nodes/node{i}/flake.nix').read_text())
