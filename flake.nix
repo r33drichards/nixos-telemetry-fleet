@@ -10,6 +10,10 @@
       nixpkgs = common.inputs.nixpkgs; comin = common.inputs.comin;
       system = "aarch64-linux"; hostname = "node3"; revision = self.rev or null;
     }) (_: { requiredSystemFeatures = []; });
+    checks.x86_64-linux.cloud-init-ssh6 = import ./tests/cloud-init-ssh6.nix {
+      pkgs = common.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      comin = common.inputs.comin;
+    };
     checks.x86_64-linux.boot-ssh-comin = import ./tests/boot-ssh-comin.nix {
       pkgs = common.inputs.nixpkgs.legacyPackages.x86_64-linux;
       comin = common.inputs.comin;

@@ -108,13 +108,22 @@ resource "azurerm_network_interface_security_group_association" "closed" {
   network_security_group_id = azurerm_network_security_group.closed[0].id
 }
 resource "azurerm_linux_virtual_machine" "node2" {
-  count                           = local.create ? 1 : 0
-  name                            = "nixos-node2"
-  location                        = var.location
-  resource_group_name             = var.resource_group_name
-  size                            = "Standard_B1s"
-  source_image_id                 = var.image_version_id
-  network_interface_ids           = [azurerm_network_interface.node2[0].id]
+  count                 = local.create ? 1 : 0
+  name                  = "nixos-node2"
+  location              = var.location
+  resource_group_name   = var.resource_group_name
+  size                  = "Standard_B1s"
+  source_image_id       = var.image_version_id
+  network_interface_ids = [azurerm_network_interface.node2[0].id]
+  # Public key and fixed bootstrap code only; never put secrets in custom data.
+  custom_data = base64encode("#cloud-config\n${yamlencode({
+    disable_root = true
+    ssh_pwauth   = false
+    write_files = [
+      { path = "/var/lib/fleet-access/authorized_keys", owner = "root:root", permissions = "0644", content = "${trimspace(var.ssh_public_key)}\n" },
+      { path = "/var/lib/cloud/scripts/per-boot/fleet-ssh6", owner = "root:root", permissions = "0700", content = file("${path.module}/bootstrap/ssh6-per-boot.sh") }
+    ]
+  })}")
   admin_username                  = "operator"
   disable_password_authentication = true
   secure_boot_enabled             = false # Only reachable after explicit standard_unsigned_gen2 approval.
