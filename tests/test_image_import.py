@@ -52,7 +52,7 @@ class ImageImport(unittest.TestCase):
             recipe.prepare(self.config, self.reports)
 
     def test_budget_overages_rejected(self):
-        for field,value in [('setup_estimate_usd',1.01), ('monthly_ancillary_estimate_usd',3.01)]:
+        for field,value in [('setup_estimate_usd',2.01), ('monthly_ancillary_estimate_usd',3.01)]:
             config = dict(self.config, **{field:value})
             with self.assertRaises(ValueError): recipe.prepare(config, self.reports)
 
@@ -209,3 +209,13 @@ class ImageImport(unittest.TestCase):
             summary=importer.transfer_failure_summary(result,path)
         self.assertEqual(summary,'AuthorizationPermissionMismatch,AutoLoginFailed,Http403')
         self.assertNotIn('SECRET',summary)
+
+    def test_two_dollar_total_setup_ceiling_and_unchanged_monthly_limit(self):
+        config=dict(self.config,setup_estimate_usd=2)
+        self.assertEqual(recipe.prepare(config,self.reports)['setup_ceiling_usd'],2)
+        plan=self.transport_plan();plan['setup_estimate_usd']=2
+        self.validate(plan)
+        plan['setup_estimate_usd']=2.01
+        with self.assertRaises(ValueError):self.validate(plan)
+        plan['setup_estimate_usd']=2;plan['monthly_ancillary_estimate_usd']=3.01
+        with self.assertRaises(ValueError):self.validate(plan)
