@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 
-def validate(node, skus):
+def validate(node, skus, require_trusted_launch=True):
     region = node['location'].lower()
     matches = [s for s in skus if s.get('resourceType') == 'virtualMachines'
                and s.get('name', '').lower() == node['size'].lower()
@@ -40,7 +40,7 @@ def validate(node, skus):
         if zone not in zones:
             raise ValueError('Selected zone lacks availability evidence')
     caps = {c['name']: c['value'] for c in sku.get('capabilities', [])}
-    if caps.get('TrustedLaunchDisabled', '').lower() != 'false':
+    if require_trusted_launch and caps.get('TrustedLaunchDisabled', '').lower() != 'false':
         raise ValueError('Trusted Launch disabled or support unverified')
     if 'V2' not in [v.strip().upper() for v in caps.get('HyperVGenerations', '').split(',')]:
         raise ValueError('Gen2 support unverified')
