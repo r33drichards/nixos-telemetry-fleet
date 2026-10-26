@@ -74,6 +74,38 @@ def verify_download(path, metadata, node):
         sha256=report['sha256'], artifact_inspection_passed=True)
 
 
+def transfer_failure_summary(result, private_dir):
+    # Read bounded local diagnostics but emit only fixed classifications, never raw text.
+    captured = (result.stdout or '')[-262144:] + (result.stderr or '')[-262144:]
+    for path in sorted(private_dir.glob('*.log'))[:4]:
+        with path.open('rb') as stream:
+            stream.seek(max(0, path.stat().st_size - 1048576))
+            captured += stream.read(1048576).decode('utf-8', errors='replace')
+    labels = [code for code in ERROR_CODES if code in captured]
+    patterns = {
+        'failed to perform auto-login': 'AutoLoginFailed',
+        'failed to get token': 'TokenAcquisitionFailed',
+        'source file is not same size': 'DestinationSizeMismatch',
+        'cannot infer': 'LocationInferenceFailed',
+        'no such file or directory': 'LocalFileMissing',
+        'x509:': 'TlsValidationFailed',
+        'context deadline exceeded': 'RequestTimeout',
+        'no transfers were scheduled': 'NoTransfersScheduled',
+    }
+    lower = captured.lower()
+    labels += [label for phrase, label in patterns.items() if phrase in lower]
+    for code in (400, 401, 403, 404, 409, 412, 429, 500, 502, 503):
+        if f'RESPONSE {code}' in captured or f'StatusCode={code}' in captured:
+            labels.append('Http' + str(code))
+    return ','.join(labels) or 'TransferFailedUnclassified'
+
+
+def validate_selected_node(plan, node):
+    nodes = plan.get('import_nodes', ['node2', 'node3'])
+    if nodes not in (['node2'], ['node3'], ['node2', 'node3']) or node not in nodes:
+        raise ValueError('Node is outside the exact approved import selection')
+
+
 def copy_to_disk(path, url, private_dir, tenant):
     parsed = urlparse(url)
     if parsed.scheme != 'https' or not parsed.hostname or not parsed.hostname.endswith(('.blob.core.windows.net', '.blob.storage.azure.net')):
@@ -88,8 +120,7 @@ def copy_to_disk(path, url, private_dir, tenant):
     except subprocess.TimeoutExpired:
         raise SafeImportError('azcopy.transfer: Timeout') from None
     if result.returncode:
-        captured = (result.stdout or '') + (result.stderr or '')
-        code = next((code for code in ERROR_CODES if code in captured), 'TransferFailed')
+        code = transfer_failure_summary(result, private_dir)
         raise SafeImportError('azcopy.transfer: ' + code)
 
 
@@ -193,6 +224,7 @@ def main():
         raise ValueError('Require approved main workflow and import gate')
     raw = pathlib.Path(args.private_plan).read_bytes()
     p = transport.validate_plan(raw, os.environ.get('APPROVED_IMAGE_IMPORT_PLAN_SHA256', ''), dt.datetime.now(dt.timezone.utc))
+    validate_selected_node(p, args.node)
     recipe.prepare(p, p['artifact_reports'])
     if args.execute:
         with tempfile.TemporaryDirectory(prefix='private-fleet-import-') as directory:

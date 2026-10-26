@@ -192,5 +192,20 @@ class ImageImport(unittest.TestCase):
     def test_partial_transfer_failure_is_not_treated_as_success(self):
         result=mock.Mock(returncode=1,stdout='SECRET',stderr='SECRET')
         with mock.patch.object(importer.subprocess,'run',return_value=result):
-            with self.assertRaisesRegex(importer.SafeImportError,'^azcopy.transfer: TransferFailed$'):
+            with self.assertRaisesRegex(importer.SafeImportError,'^azcopy.transfer: TransferFailedUnclassified$'):
                 importer.copy_to_disk(pathlib.Path('fixture'),'https://example.blob.core.windows.net/?sig=SECRET',pathlib.Path('/tmp'),'tenant')
+
+    def test_single_node_plan_rejects_other_architecture_before_cloud_calls(self):
+        importer.validate_selected_node({'import_nodes':['node2']},'node2')
+        with self.assertRaises(ValueError):
+            importer.validate_selected_node({'import_nodes':['node2']},'node3')
+
+    def test_log_summary_only_returns_fixed_classifications(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path=pathlib.Path(directory)
+            (path/'fixture.log').write_text('SECRET https://private/?sig=SECRET RESPONSE 403 AuthorizationPermissionMismatch')
+            result=mock.Mock(stdout='failed to perform auto-login SECRET',stderr='')
+            summary=importer.transfer_failure_summary(result,path)
+        self.assertEqual(summary,'AuthorizationPermissionMismatch,AutoLoginFailed,Http403')
+        self.assertNotIn('SECRET',summary)
