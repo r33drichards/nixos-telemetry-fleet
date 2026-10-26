@@ -96,6 +96,7 @@ resource "azurerm_network_interface" "node2" {
   }
   ip_configuration {
     name                          = "public-ipv6"
+    primary                       = false
     subnet_id                     = azurerm_subnet.fleet[0].id
     private_ip_address_allocation = "Dynamic"
     private_ip_address_version    = "IPv6"
@@ -113,10 +114,11 @@ resource "azurerm_linux_virtual_machine" "node2" {
   location              = var.location
   resource_group_name   = var.resource_group_name
   size                  = "Standard_B1s"
+  priority              = "Regular"
   source_image_id       = var.image_version_id
   network_interface_ids = [azurerm_network_interface.node2[0].id]
   # Public key and fixed bootstrap code only; never put secrets in custom data.
-  custom_data = base64encode("#cloud-config\n${yamlencode({
+  custom_data = base64encode("#cloud-config\n${jsonencode({
     disable_root = true
     ssh_pwauth   = false
     write_files = [

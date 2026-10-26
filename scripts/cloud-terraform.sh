@@ -31,6 +31,7 @@ if [ "$OPERATION" = plan ]; then
   if [ "$TF_ROOT" = terraform/amd-canary ]; then
     terraform -chdir="$TF_ROOT" show -json "$work/plan" > "$work/plan.json" 2>"$work/show.log"
     python3 "$preflight" --check-plan-json "$work/plan.json"
+    python3 scripts/review-canary-plan.py "$work/plan.json" "$work/plan" "$TF_ROOT/bootstrap/ssh6-per-boot.sh" > "$work/review.json"
   fi
   printf '%s' "$GITHUB_SHA" > "$work/revision"
   sha256sum "$work/plan" | cut -d' ' -f1 > "$work/sha256"
@@ -38,7 +39,11 @@ if [ "$OPERATION" = plan ]; then
   for item in plan revision sha256 root; do
     az storage blob upload --auth-mode login --account-name "$PLAN_STORAGE_ACCOUNT" --container-name "$PLAN_CONTAINER" --name "$GITHUB_RUN_ID/$item" --file "$work/$item" --overwrite false --only-show-errors > /dev/null 2>&1
   done
-  echo "Private plan saved for run $GITHUB_RUN_ID. Review it privately before requesting apply."
+  if [ "$TF_ROOT" = terraform/amd-canary ]; then
+    # Only the strict allowlisted summary is public. Binary plan stays private.
+    cat "$work/review.json"
+  fi
+  echo "Private plan saved for run $GITHUB_RUN_ID. Review it before requesting apply."
 elif [ "$OPERATION" = apply ]; then
   [[ "$PLAN_RUN_ID" =~ ^[0-9]+$ ]] && [[ "$APPROVED_PLAN_SHA256" =~ ^[a-f0-9]{64}$ ]]
   for item in plan revision root; do
@@ -49,6 +54,9 @@ elif [ "$OPERATION" = apply ]; then
   test "$(sha256sum "$work/plan" | cut -d' ' -f1)" = "$APPROVED_PLAN_SHA256"
   terraform -chdir="$TF_ROOT" show -json "$work/plan" > "$work/plan.json" 2>"$work/show.log"
   python3 "$preflight" --plan-json "$work/plan.json"
+  if [ "$TF_ROOT" = terraform/amd-canary ]; then
+    GITHUB_RUN_ID="$PLAN_RUN_ID" python3 scripts/review-canary-plan.py "$work/plan.json" "$work/plan" "$TF_ROOT/bootstrap/ssh6-per-boot.sh" > "$work/review.json"
+  fi
   if ! terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=60s "$work/plan" >"$work/apply.log" 2>&1; then
     echo 'Apply failed or partially completed. Inspect private state before any retry.' >&2; exit 1
   fi

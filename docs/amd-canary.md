@@ -31,3 +31,15 @@ The hook verifies effective sshd policy before allowing access. It installs a ru
 The NixOS `cloud-init-ssh6` test supplies the write-files result and invokes the real cloud-init per-boot runner, then tests key-only SSH, wrong-key/root rejection, firewall restart/reload and reboot. It does not emulate Azure OVF metadata delivery; live cloud-init completion and actual IPv6 reachability still require cloud qualification. Azure VM-ready status does not imply cloud-init success.
 
 Sources: [pinned cloud-init module](https://github.com/NixOS/nixpkgs/blob/da6dc0e7b26060f2f71ce3ef7088fb56ee44fa36/nixos/modules/services/system/cloud-init.nix), [Azure custom data](https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data).
+
+## Bounded saved-plan review output
+
+For the initial canary only, `review-canary-plan.py` rejects anything other than the eight expected create-only resource addresses and the approved B1s/Denmark/P6/IPv6 policy. It validates the exact cloud-init object and bootstrap file without printing either. Cloud-config is emitted as JSON (a YAML-compatible representation) to allow standard-library parsing, avoiding a new runner dependency. No key or secret value is added to Git.
+
+After private binary-plan storage succeeds, the plan job prints only fixed resource facts, the public-key fingerprint, binary SHA256, main revision, run ID and Terraform root/state-key binding. No raw inventory, public key, custom data, outputs or Terraform diagnostics are logged. A rejected summary produces a constant failure message. Apply repeats this contract check against the downloaded saved plan in addition to existing root/revision/hash checks. This is an initial-create review contract: update/no-op/replacement plans are intentionally rejected for separate review. It grants no permissions and does not automatically apply. Changed main requires a new plan; an earlier revision's plan is unusable.
+
+Read-only preflight errors now expose only fixed categories: SKU/usage timeout, read-denied, read-failed, invalid-response, validation or internal failure. SKU enumeration has a bounded 240-second timeout; usage remains 60 seconds. A timeout still prevents planning. This does not establish the cause of the earlier generic preflight failure and does not expand permissions.
+
+Native independent reads measured SKU enumeration at 124.45 seconds and returned quota values as decimal strings. The preflight normalizes only nonnegative integers or ASCII decimal digit strings; booleans, floats, negatives, whitespace and malformed values fail closed. These reads do not prove the GitHub identity has the same query permissions.
+
+The review gate accepts exactly one Ed25519 key record (optional single-line comment; CR/LF rejected before trimming). It validates the planned VM/NIC/NSG/subnet/public-IP graph using exact known IDs and Terraform configuration references plus unknown-value markers for computed IDs. Missing/foreign references or a missing NSG-association dependency fail closed.

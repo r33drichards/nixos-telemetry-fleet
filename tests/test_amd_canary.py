@@ -2,6 +2,8 @@ import copy
 import importlib.util
 import pathlib
 import unittest
+from unittest.mock import patch
+import subprocess
 
 s=importlib.util.spec_from_file_location('canary',pathlib.Path(__file__).resolve().parents[1]/'scripts/amd-canary-preflight.py')
 m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
@@ -33,3 +35,40 @@ class CanaryPreflight(unittest.TestCase):
     def test_premium_disk_support_must_be_verified(self):
         self.skus[0]["capabilities"][0]["value"]="False"
         with self.assertRaises(ValueError):m.validate(self.topology,self.skus,self.usage)
+
+    def test_query_timeout_has_safe_category(self):
+        with patch.object(m.subprocess, 'run', side_effect=subprocess.TimeoutExpired('private-command', 240, output='private inventory')):
+            with self.assertRaises(m.QueryFailure) as caught: m.read(['vm','list-skus'])
+        self.assertEqual(caught.exception.category, 'sku-query:timeout')
+        self.assertNotIn('private', str(caught.exception))
+    def test_query_denial_and_invalid_json_are_redacted(self):
+        for result,expected in [(subprocess.CompletedProcess([],1,'','AuthorizationFailed private-value'),'usage-query:read-denied'),(subprocess.CompletedProcess([],0,'private invalid JSON',''),'usage-query:invalid-response')]:
+            with patch.object(m.subprocess,'run',return_value=result):
+                with self.assertRaises(m.QueryFailure) as caught: m.read(['vm','list-usage'])
+            self.assertEqual(caught.exception.category,expected)
+            self.assertNotIn('private',str(caught.exception))
+
+    def test_actual_cli_string_quota_shape(self):
+        self.usage = [
+            {'name': {'value': 'standardBSFamily'}, 'limit': '10', 'currentValue': '0'},
+            {'name': {'value': 'cores'}, 'limit': '10', 'currentValue': '0'},
+        ]
+        m.validate(self.topology, self.skus, self.usage)
+    def test_quota_normalization_rejects_invalid_types(self):
+        for value in (True, False, -1, '-1', 1.0, '1.0', '1e2', ' 10', '+10', '', None, [], '١٠'):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError): m.quota_integer(value)
+        self.assertEqual(m.quota_integer(10),10)
+        self.assertEqual(m.quota_integer('10'),10)
+    def test_invalid_quota_fails_entire_validation(self):
+        for field in ('limit','currentValue'):
+            original=self.usage[0][field]
+            self.usage[0][field]=True
+            with self.assertRaises(ValueError):m.validate(self.topology,self.skus,self.usage)
+            self.usage[0][field]=original
+    def test_query_timeout_bounds(self):
+        with patch.object(m.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'[]','')) as run:
+            m.read(['vm','list-skus'])
+            self.assertEqual(run.call_args.kwargs['timeout'],240)
+            m.read(['vm','list-usage'])
+            self.assertEqual(run.call_args.kwargs['timeout'],60)

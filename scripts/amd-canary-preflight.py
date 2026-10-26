@@ -3,12 +3,21 @@
 import importlib.util
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
 spec = importlib.util.spec_from_file_location('sku', pathlib.Path(__file__).with_name('azure-sku-preflight.py'))
 sku = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sku)
+
+
+def quota_integer(value):
+    if type(value) is int and value >= 0:
+        return value
+    if type(value) is str and re.fullmatch(r'[0-9]+', value):
+        return int(value)
+    raise ValueError('Quota must be a nonnegative integer or decimal digit string')
 
 
 def validate(topology, skus, usage):
@@ -31,15 +40,36 @@ def validate(topology, skus, usage):
         raise ValueError('SKU family not reported')
     for category in (family, 'cores'):
         entries = [u for u in usage if u.get('name', {}).get('value', '').lower() == category]
-        if len(entries) != 1 or entries[0]['limit'] - entries[0]['currentValue'] < 1:
+        if len(entries) != 1 or quota_integer(entries[0]['limit']) - quota_integer(entries[0]['currentValue']) < 1:
             raise ValueError('One available vCPU of family and regional quota required')
 
 
+class QueryFailure(Exception):
+    def __init__(self, category):
+        self.category = category
+
+
 def read(args):
-    result = subprocess.run(['az', *args, '--output', 'json', '--only-show-errors'], capture_output=True, text=True, timeout=60)
+    operation = 'sku-query' if args[:2] == ['vm', 'list-skus'] else 'usage-query'
+    # SKU enumeration can paginate even when the CLI filters a single SKU.
+    # Bound the read; never relax availability/quota validation on timeout.
+    try:
+        result = subprocess.run(['az', *args, '--output', 'json', '--only-show-errors'], capture_output=True, text=True, timeout=240 if operation == 'sku-query' else 60)
+    except subprocess.TimeoutExpired:
+        raise QueryFailure(operation + ':timeout') from None
+    except OSError:
+        raise QueryFailure(operation + ':execution-unavailable') from None
     if result.returncode:
-        raise ValueError('Read-only query failed')
-    return json.loads(result.stdout)
+        denied = any(code in result.stderr for code in ('AuthorizationFailed', 'AuthorizationPermissionMismatch', 'Forbidden', 'Insufficient privileges'))
+        raise QueryFailure(operation + (':read-denied' if denied else ':read-failed'))
+    try:
+        value = json.loads(result.stdout)
+        if not isinstance(value, list):
+            raise ValueError()
+        return value
+    except (ValueError, TypeError):
+        raise QueryFailure(operation + ':invalid-response') from None
+
 
 
 def validate_plan_actions(plan):
@@ -68,6 +98,7 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
-        print('B1s preflight failed closed; inspect approvals/quota privately. No resource or role changes attempted.', file=sys.stderr)
+    except Exception as error:
+        category = error.category if isinstance(error, QueryFailure) else ('validation' if isinstance(error, (ValueError, KeyError, TypeError)) else 'internal')
+        print('B1s preflight failed closed [' + category + ']; no resource or role changes attempted.', file=sys.stderr)
         sys.exit(1)
