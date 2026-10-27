@@ -8,6 +8,13 @@
       package = import ./package.nix { inherit pkgs hermes; };
     in {
       packages.${system}.default = package;
+      checks.${system}.packaged-modal-sdk = pkgs.runCommand "hermes-packaged-modal-sdk" {} ''
+        export HOME="$TMPDIR/home"
+        export HERMES_HOME="$HOME/.hermes"
+        mkdir -p "$HERMES_HOME"
+        ${package.hermesVenv}/bin/python3 ${./test_modal_sdk.py}
+        touch "$out"
+      '';
       checks.${system}.packaged-irc-policy = pkgs.runCommand "hermes-packaged-irc-policy" {
         nativeBuildInputs = [ pkgs.python3 ];
       } ''

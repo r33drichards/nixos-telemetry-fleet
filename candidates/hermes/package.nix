@@ -1,6 +1,10 @@
 { pkgs, hermes }:
 let
-  base = hermes.packages.${pkgs.stdenv.hostPlatform.system}.minimal;
+  # Upstream uv.lock pins the official SDK and all transitive dependencies.
+  # Add only Modal; do not enable other optional groups or change tool policy.
+  base = hermes.packages.${pkgs.stdenv.hostPlatform.system}.minimal.override {
+    extraDependencyGroups = [ "modal" ];
+  };
   plugins = pkgs.runCommand "hermes-fleet-irc-plugins" { nativeBuildInputs = [ pkgs.git pkgs.python3 ]; } ''
     mkdir -p work/plugins
     cp -R ${hermes}/plugins/. work/plugins/
