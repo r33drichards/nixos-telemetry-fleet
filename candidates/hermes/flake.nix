@@ -8,7 +8,15 @@
       package = import ./package.nix { inherit pkgs hermes; };
     in {
       packages.${system}.default = package;
-      checks.${system}.packaged-irc-policy = pkgs.runCommand "hermes-packaged-irc-policy" {
+      checks.${system} = {
+      packaged-modal-sdk = pkgs.runCommand "hermes-packaged-modal-sdk" {} ''
+        export HOME="$TMPDIR/home"
+        export HERMES_HOME="$HOME/.hermes"
+        mkdir -p "$HERMES_HOME"
+        ${package.hermesVenv}/bin/python3 ${./test_modal_sdk.py}
+        touch "$out"
+      '';
+      packaged-irc-policy = pkgs.runCommand "hermes-packaged-irc-policy" {
         nativeBuildInputs = [ pkgs.python3 ];
       } ''
         test "$(readlink ${package}/share/hermes-agent/plugins)" = "${package.fleetPlugins}"
@@ -21,6 +29,7 @@ assert data['env']['HERMES_BUNDLED_PLUGINS'] == sys.argv[2] + '/share/hermes-age
 PY
         touch "$out"
       '';
+      };
       nixosModules.default = { pkgs, ... }: {
         imports = [ ./service.nix ];
         fleet.hermes.package = import ./package.nix { inherit pkgs hermes; };
