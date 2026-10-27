@@ -4,7 +4,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [oidc-check, image-auth-check, image-transport, image-import, plan, apply, amd-plan, amd-apply, e2e]
+        options: [oidc-check, egress-read, image-auth-check, image-transport, image-import, plan, apply, amd-plan, amd-apply, e2e]
         required: true
       oidc_environment:
         description: Identity to verify (oidc-check only)
@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   oidc-check:
-    if: github.ref == 'refs/heads/main' && inputs.operation == 'oidc-check'
+    if: github.ref == 'refs/heads/main' && (inputs.operation == 'oidc-check' || (inputs.operation == 'egress-read' && inputs.oidc_environment == 'fleet-plan'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: ${{ inputs.oidc_environment }}
@@ -64,6 +64,9 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Verify account and read fleet RG only
         run: python3 scripts/azure-oidc-check.py
+      - name: Read bounded node2 outbound settings
+        if: inputs.operation == 'egress-read'
+        run: python3 scripts/azure-egress-read.py
   image-auth-check:
     if: github.ref == 'refs/heads/main' && inputs.operation == 'image-auth-check'
     runs-on: ubuntu-24.04
