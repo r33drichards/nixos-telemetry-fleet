@@ -6,6 +6,10 @@ on:
         type: choice
         options: [oidc-check, egress-read, image-auth-check, image-transport, image-import, plan, apply, amd-plan, amd-apply, e2e]
         required: true
+      retain_drift_diagnostic:
+        description: Retain private drift comparison only after private reader verification (amd-plan only)
+        type: boolean
+        default: false
       oidc_environment:
         description: Identity to verify (oidc-check only)
         type: choice
@@ -115,6 +119,8 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_IN_AUTOMATION: 'true'
       TF_INPUT: 'false'
+      RETAIN_DRIFT_DIAGNOSTIC: ${{ inputs.retain_drift_diagnostic }}
+      DRIFT_PRIVATE_REVIEW_READY: ${{ vars.DRIFT_PRIVATE_REVIEW_READY }}
       OPERATION: ${{ (inputs.operation == 'apply' || inputs.operation == 'amd-apply') && 'apply' || 'plan' }}
       TF_ROOT: ${{ startsWith(inputs.operation, 'amd-') && 'terraform/amd-canary' || 'terraform' }}
       PLAN_RUN_ID: ${{ inputs.plan_run_id }}

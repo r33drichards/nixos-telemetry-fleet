@@ -8,6 +8,11 @@ case "$TF_ROOT" in
   terraform/amd-canary) preflight=scripts/amd-canary-preflight.py ;;
   *) echo 'Unsupported Terraform root' >&2; exit 1 ;;
 esac
+if [ "${RETAIN_DRIFT_DIAGNOSTIC:-false}" = true ]; then
+  test "$TF_ROOT" = terraform/amd-canary
+  test "$OPERATION" = plan
+  test "${DRIFT_PRIVATE_REVIEW_READY:-}" = explicitly-confirmed
+fi
 umask 077
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -30,6 +35,21 @@ if [ "$OPERATION" = plan ]; then
   fi
   if [ "$TF_ROOT" = terraform/amd-canary ]; then
     terraform -chdir="$TF_ROOT" show -json "$work/plan" > "$work/plan.json" 2>"$work/show.log"
+    if [ "${RETAIN_DRIFT_DIAGNOSTIC:-false}" = true ]; then
+      test "${DRIFT_PRIVATE_REVIEW_READY:-}" = explicitly-confirmed
+      terraform -chdir="$TF_ROOT" providers schema -json > "$work/schema.json" 2>"$work/schema.log"
+      python3 scripts/private-drift-diagnostic.py "$work/plan.json" "$work/schema.json" "$work/drift"
+      # Diagnostic-only prefix cannot be consumed by the saved-plan apply route.
+      prefix="diagnostics/drift/$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT"
+      for item in comparison.json manifest.json; do
+        if ! az storage blob upload --auth-mode login --account-name "$PLAN_STORAGE_ACCOUNT" --container-name "$PLAN_CONTAINER" --name "$prefix/$item" --file "$work/drift/$item" --overwrite false --only-show-errors > /dev/null 2>&1; then
+          echo 'Private diagnostic retention failed; reconcile the run prefix before retry.' >&2
+          exit 1
+        fi
+      done
+      cat "$work/drift/summary.json"
+      echo "Private diagnostic retained under $prefix; no state reconciliation or apply performed."
+    fi
     python3 "$preflight" --check-plan-json "$work/plan.json"
     python3 scripts/review-canary-plan.py "$work/plan.json" "$work/plan" "$TF_ROOT/bootstrap/ssh6-per-boot.sh" > "$work/review.json"
   fi
