@@ -220,6 +220,45 @@ def review(plan, binary, revision, run, bootstrap):
                 cloud_init='exact reviewed public-key/per-boot payload')
 
 
+def safe_drift(plan):
+    # Fixed names only: never emit arbitrary attribute/map keys, IDs or values.
+    fields = frozenset(('id', 'name', 'location', 'tags', 'size', 'source_image_id',
+        'admin_username', 'admin_ssh_key', 'custom_data', 'network_interface_ids',
+        'disable_password_authentication', 'secure_boot_enabled', 'vtpm_enabled',
+        'provision_vm_agent', 'allow_extension_operations', 'os_disk',
+        'boot_diagnostics', 'identity', 'computer_name', 'patch_mode',
+        'patch_assessment_mode', 'public_ip_address', 'private_ip_address',
+        'virtual_machine_id', 'disk_controller_type', 'ip_configuration',
+        'network_security_group_id', 'subnet_id', 'default_outbound_access_enabled',
+        'address_prefixes', 'address_space', 'security_rule', 'dns_servers',
+        'input', 'output', 'triggers_replace'))
+    entries = plan.get('resource_drift', [])
+    if not isinstance(entries, list): return {'schema': 'invalid'}
+    result = {'count': len(entries), 'known': [], 'unrecognized_count': 0}
+    for entry in entries[:32]:
+        if not isinstance(entry, dict) or entry.get('address') not in ADDRESSES:
+            result['unrecognized_count'] += 1
+            continue
+        change = entry.get('change', {})
+        if not isinstance(change, dict):
+            result['unrecognized_count'] += 1
+            continue
+        before, after = change.get('before'), change.get('after')
+        item = {'address': entry['address'], 'action': 'other', 'changed_fields': [],
+                'unrecognized_fields_changed': False}
+        for action in ('create', 'update', 'delete', 'no-op'):
+            if change.get('actions') == [action]: item['action'] = action
+        if isinstance(before, dict) and isinstance(after, dict):
+            changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
+            item['changed_fields'] = sorted(changed & fields)
+            item['unrecognized_fields_changed'] = bool(changed - fields)
+        else:
+            item['object_comparison_unavailable'] = True
+        result['known'].append(item)
+    result['truncated'] = len(entries) > 32
+    return result
+
+
 def safe_diagnostics(plan, error):
     """Fixed labels, booleans and counts only, even for adversarial plan data."""
     def flag(value):
@@ -248,6 +287,7 @@ def safe_diagnostics(plan, error):
     result['applyable'] = flag(plan.get('applyable'))
     result['complete'] = flag(plan.get('complete'))
     result['has_drift'] = bool(plan.get('resource_drift'))
+    result['drift_diagnostics'] = safe_drift(plan)
     counts = {action: 0 for action in ('create', 'update', 'delete', 'no-op', 'other')}
     changes = plan.get('resource_changes', [])
     if not isinstance(changes, list):
