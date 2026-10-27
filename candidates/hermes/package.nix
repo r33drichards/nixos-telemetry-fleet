@@ -4,6 +4,15 @@ let
   # Add only Modal; do not enable other optional groups or change tool policy.
   base = hermes.packages.${pkgs.stdenv.hostPlatform.system}.minimal.override {
     extraDependencyGroups = [ "modal" ];
+    # Patch only the Python source passed to the pinned upstream venv builder.
+    callPackage = path: args: pkgs.callPackage path (args //
+      pkgs.lib.optionalAttrs (toString path == toString (hermes + "/nix/python.nix")) {
+        pythonSrc = pkgs.applyPatches {
+          name = "hermes-modal-timeout-source";
+          src = args.pythonSrc;
+          patches = [ ./modal-timeout.patch ];
+        };
+      });
   };
   plugins = pkgs.runCommand "hermes-fleet-irc-plugins" { nativeBuildInputs = [ pkgs.git pkgs.python3 ]; } ''
     mkdir -p work/plugins

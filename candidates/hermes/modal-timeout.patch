@@ -1,0 +1,50 @@
+--- a/tools/environments/modal.py
++++ b/tools/environments/modal.py
+@@ -5,6 +5,7 @@
+ import base64
+ import io
+ import logging
++import os
+ import shlex
+ import tarfile
+ import threading
+@@ -19,6 +20,18 @@
+ from tools.environments.remote_common import bash_argv, ensure_lazy_dep
+ 
+ logger = logging.getLogger(__name__)
++
++def _sandbox_timeout(kwargs: dict) -> int:
++    # Bound direct sandbox lifetime independently from each command timeout.
++    value = kwargs.pop("timeout", None)
++    if value is None:
++        value = os.environ.get("HERMES_MODAL_SANDBOX_TIMEOUT", "300")
++    if type(value) is str and value.isascii() and value.isdecimal():
++        value = int(value)
++    if type(value) is not int or not 1 <= value <= 300:
++        raise ValueError("Modal sandbox timeout must be an integer from 1 to 300 seconds")
++    return value
++
+ 
+ def _snapshot_store() -> Path:
+     # Resolved per call: the multiplexed gateway serves every profile from one process, so an
+@@ -141,6 +154,8 @@
+     def __init__(self, image: str, cwd: str = "/root", timeout: int = 60,
+                  modal_sandbox_kwargs: Optional[dict[str, Any]] = None,
+                  persistent_filesystem: bool = True, task_id: str = "default"):
++        create_kwargs = dict(modal_sandbox_kwargs or {})
++        sandbox_timeout = _sandbox_timeout(create_kwargs)
+         super().__init__(cwd=cwd, timeout=timeout)
+         self._persistent, self._task_id = persistent_filesystem, task_id
+         self._sandbox = self._app = None
+@@ -157,10 +172,9 @@
+         def _create(image_spec: Any) -> None:
+             async def _create_sandbox():
+                 app = await _modal.App.lookup.aio("hermes-agent", create_if_missing=True)
+-                create_kwargs = dict(modal_sandbox_kwargs or {})
+                 sandbox = await _modal.Sandbox.create.aio(
+                     "sleep", "infinity", image=image_spec, app=app,
+-                    timeout=int(create_kwargs.pop("timeout", 3600)), **create_kwargs)
++                    timeout=sandbox_timeout, **create_kwargs)
+                 return app, sandbox
+             self._app, self._sandbox = self._worker.run_coroutine(_create_sandbox(), timeout=300)
+         try:
