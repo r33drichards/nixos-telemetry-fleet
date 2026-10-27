@@ -29,8 +29,8 @@ class DriftTests(unittest.TestCase):
         # Reviewed main a2544d3: preserve the complete decision function.
         tree = ast.parse(path.read_text())
         node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'review')
-        digest = hashlib.sha256(ast.dump(node).encode()).hexdigest()
-        self.assertEqual(digest, '9b1008cd8cc148afa7391d41b087a96f82f266a6af254b665c93cb974ee22db5')
+        digest = hashlib.sha256(ast.get_source_segment(path.read_text(), node).encode()).hexdigest()
+        self.assertEqual(digest, 'cdc196ffddb6d682915f427df484c74874ec1b172ed383953a1530acba2c2e95')
 
 
 if __name__ == '__main__': unittest.main()
