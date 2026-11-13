@@ -87,6 +87,31 @@ Image/video generation are enabled in policy but were unavailable because their 
 
 ### Step 1: Verify access and capture health
 
+To set up a new client from a base64-encoded private key, run from this repository:
+
+```sh
+# Set this variable from your secret manager, or encode your existing authorized key:
+export HERMES_SSH_KEY_B64="$(base64 < ~/.ssh/id_ed25519 | tr -d '\n')"
+python3 scripts/setup-hermes-ssh.py
+unset HERMES_SSH_KEY_B64
+ssh hermes-azure
+```
+
+The script requires Python 3 and OpenSSH (`ssh-keygen`). If needed, run it through
+`nix shell nixpkgs#python3 nixpkgs#openssh -c python3 scripts/setup-hermes-ssh.py`.
+It installs a separate `~/.ssh/id_hermes_azure` (0600) and public key, and manages
+one block in `~/.ssh/config`, preserving other entries and backing up changed
+existing config. It rejects invalid/encrypted keys, symlink destinations, a
+different existing identity, or an unmanaged `hermes-azure` alias. It does not
+print key material, contact the VM, or change its authorized keys. The supplied
+key must already be authorized on node2. Normal SSH host-key checks remain in
+effect; verify the host fingerprint through the owner's trusted channel.
+
+To undo this client setup, remove only its marked config block and its two
+`id_hermes_azure` files, or restore the recorded `config.before-hermes-*` backup
+if no later client-config changes need preserving. This does not revoke the key
+on the server. Do not remove an unrelated `id_ed25519` identity.
+
 **Action:** Connect with the SSH command above. Verify `hostname`, `sudo -n id`, and `systemctl is-active hermes-irc`. Inspect only the relevant service properties:
 
 ```sh
