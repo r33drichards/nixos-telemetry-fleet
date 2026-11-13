@@ -24,12 +24,18 @@ external SSH reachability or reboot health. Test an actual key-authenticated
 IPv6 connection independently before/after activation and after an approved
 reboot; retain the previous generation and console recovery access.
 
-Privileged bootstrap remains unresolved: the existing operator cannot sudo.
+Historical candidate status: privileged bootstrap was unresolved and operator could not sudo.
 Installing the prebuilt closure, runtime credentials and enabling the agent
 needs a separately reviewed administrator path. No RunCommand, extension,
 GRUB recovery, credential delivery or reboot is authorized by this source patch.
 First test the separately approved shared-default-outbound path, including
 GitHub and Cachix HTTPS/WebSocket reachability; no paid network fallback.
+
+For the later live node2 installation, operator passwordless sudo was established
+on 2026-11-13, but the Cachix agent remains inactive. Follow the
+[Hermes management runbook](runbooks/hermes-node2.md) for current access,
+runtime overrides, verification, and recovery. The runtime changes are not yet
+reproduced by this candidate's Nix configuration.
 
 References: https://docs.cachix.org/deploy/running-an-agent/nixos and
 https://docs.cachix.org/deploy/reference . A nonzero rollback script requests

@@ -1,5 +1,7 @@
 # nixos-telemetry-fleet
 
+For the live node2 Hermes IRC installation, see the [management runbook](docs/runbooks/hermes-node2.md) and [agent skill](skills/manage-hermes-node2/SKILL.md). They document the 2026-11-13 host-local changes and the differences from the repository's baseline profiles below. These documents do not activate or reconcile a Nix deployment.
+
 Current scope: **two bare Azure NixOS hosts, one AMD and one ARM, with SSH and Comin updates from `main`.** No Wasm/Spin, Kubernetes, Grafana, Prometheus, exporter or WireGuard service is required or enabled by the active profile. Earlier modules and tests are retained as optional source only. The repository keeps its existing name.
 
 **Nothing is deployed by these defaults.** Host, network and hardware approvals remain false. No secrets belong in Git, even encrypted payloads. No private keys, cloud credentials or Terraform state are committed.

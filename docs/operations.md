@@ -1,5 +1,7 @@
 > Latest scope supersedes the historical service sections below: TWO bare Azure NixOS hosts (AMD + ARM), SSH and Comin only. Optional WireGuard, telemetry, Wasm and Kubernetes are disabled and are not acceptance requirements. See README for the active profile.
 
+> For the later live node2 Hermes installation and its host-local overrides, use the [Hermes management runbook](runbooks/hermes-node2.md). The historical profile description below does not describe that service's current runtime.
+
 # Bootstrap, update and recovery
 
 ## Network and secrets
