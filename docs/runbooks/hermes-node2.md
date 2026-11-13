@@ -15,7 +15,7 @@ Update and recover the live Hermes gateway without losing SSH access, runtime cr
 
 - This runbook records live observations as of **2026-11-13**. Recheck identity, service definitions, limits, and tool availability before changes.
 - Restarting `hermes-irc` interrupts agent turns and briefly disconnects IRC. Avoid restarting during an active task; capture evidence before recovery.
-- The VM has one vCPU, about 894 MiB usable RAM, no swap, and a 64 GiB OS disk. Its hosted model and Computer Use desktop run elsewhere.
+- The VM has one vCPU, about 894 MiB usable RAM, and a 64 GiB OS disk. A 1 GiB swap file was added during the second 2026-11-13 memory incident; Hermes may use at most 512 MiB of swap. Its hosted model and Computer Use desktop run elsewhere.
 - Never commit secrets, secret-bearing backups, Terraform state, or environment-file contents. Do not put secrets in a Nix expression, command argument, shell history, or Azure Run Command script. Logs and session records can contain private task content; extract only the evidence needed.
 - Do not run `hermes gateway install --force` as a general repair: it may replace the deliberately hardened/custom service. Preserve existing IRC access, authentication, and service isolation.
 
@@ -46,6 +46,8 @@ Update and recover the live Hermes gateway without losing SSH access, runtime cr
 | `/etc/systemd/system.control/hermes-irc.service.d/` | Persistent launcher, transport, environment, and resource overrides |
 | `/var/lib/hermes/.hermes/` | Writable Hermes state, auth, sessions, skills, memory, and logs |
 | `/etc/sudoers.d/operator` | Validated `operator ALL=(ALL:ALL) NOPASSWD: ALL` rule |
+| `/var/swap/hermes` | Root-owned mode 0600, 1 GiB swap file on the existing OS disk |
+| `/etc/systemd/system.control/var-swap-hermes.swap` | Persistent swap unit; `swap.target.d/50-hermes-swap.conf` in the same control directory adds its boot dependency |
 | `/var/lib/hermes-config-backups/` | Root-only matching config/validator backups; some also include environment files |
 
 `memories/MEMORY.md` and `memories/USER.md` are created as native memory is used. The native memory and skills tools must be enabled to make their writable storage agent-editable. Computer Use `/data/memory/` is on a different machine and disk.
@@ -223,6 +225,53 @@ sudo -n systemctl set-property hermes-irc.service MemoryHigh=480M
 The persistent systemd override is under `/etc/systemd/system.control/hermes-irc.service.d/`; the runtime override is under `/run/systemd/system.control/`. **MemoryMax remained 512 MiB and CPUQuota remained 50%.** This is a measured mitigation, not proof that arbitrary image workloads fit. Check host headroom and whether the `high` counter continues increasing. If pressure recurs, investigate image sizing/provider behavior or an owner-approved capacity change; do not repeatedly increase limits on the 1 GiB host.
 
 For an unsuccessful runtime-only experiment, restore the recorded prior property with `systemctl set-property --runtime`. If changing the persistent value, inspect/remove the corresponding runtime override or set both scopes consistently. Do not roll back to 384 MiB during an active image workload merely to match the repository baseline.
+
+### Second incident: the 480 MiB soft limit was also reached
+
+The owner reported another two-minute IRC ping timeout at 20:18:33 UTC on 2026-11-13. At 20:20:57 the same process was still running with no restarts, its cgroup resident use was pinned at approximately 480 MiB, `high` events had climbed from 50,675 to 79,750, and `oom`/`oom_kill` remained zero. Most cgroup memory was anonymous; there was no swap and `MemorySwapMax=0`. The last completed tool call was at 20:14:52. A stalled upstream model stream was also reported once the process resumed; do not assume every model timeout is solely memory-related.
+
+The second mitigation created `/var/swap/hermes` (1 GiB, root-owned 0600) on the existing disk, initialized it with `mkswap`, and started this unit:
+
+```ini
+# /etc/systemd/system.control/var-swap-hermes.swap
+[Unit]
+Description=Swap headroom for the small Hermes Azure VM
+
+[Swap]
+What=/var/swap/hermes
+```
+
+The persistent dependency is:
+
+```ini
+# /etc/systemd/system.control/swap.target.d/50-hermes-swap.conf
+[Unit]
+Wants=var-swap-hermes.swap
+```
+
+`/etc/systemd/system` is generated and read-only on this host. Use the existing writable systemd control hierarchy for these host-local units; do not modify the Nix store or remount it writable. After creating the unit and drop-in, `systemctl daemon-reload` and `systemctl start var-swap-hermes.swap` activated swap. Then:
+
+```sh
+sudo -n systemctl set-property hermes-irc.service MemorySwapMax=512M
+```
+
+`MemoryHigh=480M`, `MemoryMax=512M`, and `CPUQuota=50%` were retained. The process used about 34 MiB of swap and became responsive, then exited with `75/TEMPFAIL`; systemd restarted it once at 20:23:09. IRC reconnected at 20:23:20. The new process used roughly 405 MiB and had zero throttle/OOM events in the immediate post-recovery check. This is evidence of recovery, not a long-duration capacity qualification or proof that the interrupted task completed.
+
+Verify swap and persistence without rebooting an active agent:
+
+```sh
+swapon --show
+systemctl show var-swap-hermes.swap -p ActiveState -p FragmentPath
+systemctl show swap.target -p Wants
+sudo -n systemd-analyze verify /etc/systemd/system.control/var-swap-hermes.swap
+sudo -n systemctl show hermes-irc -p MemoryCurrent -p MemoryHigh -p MemoryMax -p MemorySwapMax -p NRestarts
+sudo -n cat /sys/fs/cgroup/system.slice/hermes-irc.service/memory.swap.current
+sudo -n cat /sys/fs/cgroup/system.slice/hermes-irc.service/memory.events
+```
+
+The swap unit and boot dependency were inspected and validated; reboot behavior was not exercised. Monitor tool progress and IRC, not just service status. Swap can add latency and does not make unlimited workloads fit. Do not recreate/format an existing swap path; inspect it first. The file can contain process secrets and belongs outside Git and ordinary backups.
+
+**Rollback:** first stop/drain Hermes and confirm sufficient free RAM to absorb all used swap plus operating headroom. Restore `MemorySwapMax=0` only when safe. Stop `var-swap-hermes.swap` (which performs swapoff); if it fails, keep the file and unit and investigate memory pressure. Only after successful swapoff remove the exact swap unit and `50-hermes-swap.conf` drop-in, reload systemd, and remove the inactive `/var/swap/hermes` file if desired. Do not remove the containing control directory or other service overrides. The earlier no-swap policy was vulnerable to the observed workload, so restoring it may reintroduce the stall.
 
 ## Access recovery
 
