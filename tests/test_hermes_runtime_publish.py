@@ -77,6 +77,18 @@ class ClosureIdentityTests(unittest.TestCase):
 
 
 class PublishWorkflowTests(unittest.TestCase):
+    def test_pr_qualification_runs_evidence_without_publication_or_outputs(self):
+        workflow = (ROOT / ".github/workflows/hermes-build.yml").read_text()
+        self.assertIn("python3 -m unittest discover -s tests -p test_hermes_runtime_publish.py -v", workflow)
+        self.assertIn("HERMES_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}", workflow)
+        self.assertIn('if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then', workflow)
+        self.assertIn("bash scripts/hermes-runtime-publish.sh qualify >/dev/null", workflow)
+        self.assertIn('bash scripts/hermes-runtime-publish.sh qualify >> "$GITHUB_OUTPUT"', workflow)
+        self.assertIn("value: ${{ jobs.build.outputs.runtime_root }}", workflow)
+        self.assertIn("value: ${{ jobs.build.outputs.closure_sha256 }}", workflow)
+        for forbidden in ("secrets.", "environment:", "upload-artifact", "pull_request_target"):
+            self.assertNotIn(forbidden, workflow)
+
     def test_workflow_must_be_armed_before_jobs_and_still_checks_environment(self):
         workflow = (ROOT / ".github/workflows/hermes-runtime-publish.yml").read_text()
         qualify, publish = workflow.split("  qualify:\n", 1)[1].split("\n  publish:\n", 1)
@@ -158,7 +170,10 @@ case "$1" in
       *) exit 9 ;;
     esac ;;
   path-info) printf '%s\n' "$MOCK_CLOSURE"; exit "${MOCK_NIX_EXIT:-0}" ;;
-  store) [[ "$2 $3 $4" == "verify --recursive --no-trust" ]]; exit "${MOCK_VERIFY_EXIT:-0}" ;;
+  store)
+    [[ "$2 $3 $4" == "verify --recursive --no-trust" ]]
+    printf '%s\n' "${MOCK_VERIFY_DETAIL:-}" >&2
+    exit "${MOCK_VERIFY_EXIT:-0}" ;;
   *) exit 9 ;;
 esac
 """)
@@ -187,6 +202,30 @@ esac
         vals = dict(line.split("=", 1) for line in result.stdout.splitlines())
         self.assertEqual(set(vals), {"root", "closure_sha256"})
         return {"QUALIFIED_ROOT": vals["root"], "QUALIFIED_CLOSURE_SHA256": vals["closure_sha256"]}
+
+    def test_pr_evidence_is_bound_to_actual_checkout_and_cannot_prepare(self):
+        (self.root / "result-hermes").symlink_to("runtime")
+        pr = {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REF": "refs/pull/28/merge",
+            "GITHUB_SHA": "c" * 40,  # Synthetic merge is not the checked-out revision.
+            "HERMES_PR_HEAD_SHA": REV,
+        }
+        result = self.run_phase("qualify", **pr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"root={RUNTIME}\n", result.stdout)
+        before = self.call_log()
+        for change in (
+            {"HERMES_PR_HEAD_SHA": ""},
+            {"HERMES_PR_HEAD_SHA": "c" * 40},
+            {"GITHUB_REF": "refs/heads/main"},
+            {"GITHUB_EVENT_NAME": "pull_request_target"},
+            {"CACHIX_AUTH_TOKEN": TOKEN},
+        ):
+            with self.subTest(change=change):
+                self.assertNotEqual(self.run_phase("qualify", **(pr | change)).returncode, 0)
+        self.assertNotEqual(self.run_phase("prepare", **pr).returncode, 0)
+        self.assertEqual(self.call_log(), before)
 
     def test_independent_build_must_match_and_pin_client(self):
         env = self.qualify()
@@ -240,6 +279,15 @@ esac
                     if outgoing.is_symlink():
                         outgoing.unlink()
         self.assertNotIn("github:NixOS/nixpkgs", self.call_log())
+
+    def test_qualification_suppresses_raw_verification_diagnostics(self):
+        (self.root / "result-hermes").symlink_to("runtime")
+        result = self.run_phase(
+            "qualify", MOCK_VERIFY_EXIT="1", MOCK_VERIFY_DETAIL=f"inventory: {DEP}"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "Hermes runtime content verification failed.\n")
 
     def test_changed_contents_at_same_root_rejected_before_client_build(self):
         env = self.qualify()

@@ -15,6 +15,9 @@ on:
       - 'deploy/node2-hermes*'
       - 'tests/hermes-*'
       - 'tests/test_structure.py'
+      - 'tests/test_hermes_runtime_publish.py'
+      - 'scripts/hermes-runtime-publish.sh'
+      - 'scripts/hermes-runtime-identity.py'
       - 'Makefile'
 permissions:
   contents: read
@@ -36,6 +39,8 @@ jobs:
       - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
         with:
           install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+      - name: Check Hermes runtime publication and evidence guards
+        run: python3 -m unittest discover -s tests -p test_hermes_runtime_publish.py -v
       - name: Verify committed lock remains unchanged
         run: |
           nix flake metadata ./candidates/hermes --no-update-lock-file --json > /tmp/hermes-metadata.json
@@ -45,9 +50,16 @@ jobs:
       - name: Build runtime closure without upload or activation
         run: nix build ./candidates/hermes#default --no-update-lock-file --out-link result-hermes -L
       - name: Identify the tested Hermes runtime
-        if: github.event_name == 'push'
         id: runtime
-        run: bash scripts/hermes-runtime-publish.sh qualify >> "$GITHUB_OUTPUT"
+        env:
+          HERMES_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            bash scripts/hermes-runtime-publish.sh qualify >/dev/null
+            echo "Verified runtime closure bytes and canonical identity for the PR head."
+          else
+            bash scripts/hermes-runtime-publish.sh qualify >> "$GITHUB_OUTPUT"
+          fi
   integrated-node2:
     runs-on: ubuntu-24.04
     timeout-minutes: 90

@@ -78,6 +78,14 @@ closure through public Actions artifacts to achieve isolation.
 
 ## Verification
 
+Pull requests run a credential-free qualification on the checked-out PR head:
+the guard tests, native check, built runtime NAR verification, and canonical
+closure calculation. The PR evidence step reports only success or failure;
+it does not emit closure identifiers as workflow outputs, print the inventory,
+or upload an archive. Push qualification still emits the root and digest for
+the publisher. PR jobs do not use the protected publication environment or the
+dedicated token.
+
 Run `python3 -m unittest discover -s tests -p test_hermes_runtime_publish.py -v`.
 The local harness uses synthetic commands and cannot publish. In GitHub, require
 the qualified exact revision, verify that an unarmed main push skips both jobs

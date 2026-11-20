@@ -4,10 +4,19 @@ shopt -s inherit_errexit
 # This script is never run with a publication credential.
 [[ -z "${CACHIX_AUTH_TOKEN:-}" ]]
 [[ "${GITHUB_REPOSITORY:-}" == r33drichards/nixos-telemetry-fleet ]]
-[[ "${GITHUB_EVENT_NAME:-}" == push ]]
-[[ "${GITHUB_REF:-}" == refs/heads/main ]]
-[[ "${GITHUB_SHA:-}" =~ ^[0-9a-f]{40}$ ]]
-[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+case "${1:-}:${GITHUB_EVENT_NAME:-}" in
+    qualify:pull_request)
+        [[ "${GITHUB_REF:-}" =~ ^refs/pull/[1-9][0-9]*/merge$ ]]
+        expected_revision="${HERMES_PR_HEAD_SHA:-}"
+        ;;
+    qualify:push|prepare:push)
+        [[ "${GITHUB_REF:-}" == refs/heads/main ]]
+        expected_revision="${GITHUB_SHA:-}"
+        ;;
+    *) exit 1 ;;
+esac
+[[ "$expected_revision" =~ ^[0-9a-f]{40}$ ]]
+[[ "$(git rev-parse HEAD)" == "$expected_revision" ]]
 git diff --quiet HEAD --
 [[ -z "$(git ls-files --others --exclude-standard -- candidates/hermes)" ]]
 
@@ -22,8 +31,12 @@ runtime_identity() {
     [[ "$root" =~ $store_path_re && -d "$result" && -f "$result/command-map.json" && -d "$result/share/hermes-agent" ]]
     # Validate actual contents against the Nix database, not just display paths.
     # Trust/signatures are separate; this job is comparing independent builds.
-    nix store verify --recursive --no-trust "$root" >&2
-    digest=$(nix path-info --recursive --json "$root" | python3 scripts/hermes-runtime-identity.py "$root")
+    # Keep full closure paths and Nix verification diagnostics out of job logs.
+    if ! nix store verify --recursive --no-trust "$root" >/dev/null 2>&1; then
+        echo "Hermes runtime content verification failed." >&2
+        return 1
+    fi
+    digest=$(nix path-info --recursive --json "$root" 2>/dev/null | python3 scripts/hermes-runtime-identity.py "$root")
     [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
     printf 'root=%s\nclosure_sha256=%s\n' "$root" "$digest"
 }
