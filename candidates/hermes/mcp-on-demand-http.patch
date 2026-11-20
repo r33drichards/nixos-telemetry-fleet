@@ -827,36 +827,3 @@ index 32a70d28..c90172ca 100644
                  if http_detail != str(_unwrap_exception_group(exc)):  # opaque SDK error + a recorded rejection
                      raise ConnectionError(f"MCP server '{self.name}': Streamable HTTP connect failed "
                                            f"({http_detail})") from exc
-diff --git a/website/docs/user-guide/features/mcp.md b/website/docs/user-guide/features/mcp.md
-index 754de7fe..e2328b0a 100644
---- a/website/docs/user-guide/features/mcp.md
-+++ b/website/docs/user-guide/features/mcp.md
-@@ -26,6 +26,28 @@ The `mcpServers` block in your `~/.claude.json` maps to `mcp_servers` in Hermes'
- - Utility wrappers for MCP resources and prompts when supported by the server
- - Per-server filtering so you can expose only the MCP tools you actually want Hermes to see
- 
-+## On-demand HTTP sessions
-+
-+For a scale-to-zero Streamable HTTP server, opt in with:
-+
-+```yaml
-+mcp_servers:
-+  browser:
-+    url: https://mcp.example.com/mcp
-+    on_demand: true
-+    idle_timeout_seconds: 10
-+```
-+
-+Hermes discovers the catalog on startup and retains it while the session is
-+closed. The separate `lazy` cache option does not apply in this mode. After idling, the
-+next call opens a fresh session; Hermes does not poll to keep it alive. If
-+first discovery fails before any catalog exists, reload the MCP configuration
-+once the endpoint is reachable. There is no background retry loop. This mode
-+supports static headers or no authentication, not interactive OAuth or SSE.
-+Treat lost responses after dispatch as an unknown outcome; Hermes does not
-+automatically retry those operations. A new session also does not restore
-+server-side state such as open browser tabs.
-+
- ## Quick start
- 
- 1. MCP support ships with the standard install — no extra step needed.
