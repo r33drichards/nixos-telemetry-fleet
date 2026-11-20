@@ -1,0 +1,829 @@
+diff --git a/tests/tools/test_mcp_on_demand_http.py b/tests/tools/test_mcp_on_demand_http.py
+new file mode 100644
+index 00000000..6aafb0ac
+--- /dev/null
++++ b/tests/tools/test_mcp_on_demand_http.py
+@@ -0,0 +1,253 @@
++"""Loopback stateful MCP fixture exercises the real transport and legacy handshake."""
++import asyncio
++import socket
++
++import pytest
++import pytest_asyncio
++from starlette.applications import Starlette
++from starlette.responses import JSONResponse, Response
++from starlette.routing import Route
++
++from tools import mcp_tool, mcp_tool_handlers
++from tools.mcp_tool_server_run import DemandOutcomeUncertain
++
++pytest.importorskip("mcp")
++uvicorn = pytest.importorskip("uvicorn")
++
++
++class StatefulServer:
++    def __init__(self):
++        self.methods = []
++        self.session = 0
++        self.effects = 0
++        self.drop_after_write = False
++        self.schema_revision = 1
++        self.started = asyncio.Event()
++        self.release = asyncio.Event()
++        self.pause = False
++        self.unavailable = False
++
++    async def handle(self, request):
++        if request.method != "POST":
++            self.methods.append(request.method)
++            return Response(status_code=405)
++        req = await request.json()
++        method = req["method"]
++        self.methods.append(method)
++        if self.unavailable:
++            return Response(status_code=503)
++        if method == "initialize":
++            self.session += 1
++            result = {"protocolVersion": req["params"]["protocolVersion"],
++                      "capabilities": {"tools": {}}, "serverInfo": {"name": "test", "version": "1.0"}}
++            headers = {"Mcp-Session-Id": f"test-session-{self.session}"}
++        elif request.headers.get("mcp-session-id") != f"test-session-{self.session}":
++            return Response(status_code=404)
++        elif method == "notifications/initialized":
++            return Response(status_code=202)
++        else:
++            headers = {}
++            if method == "tools/list":
++                result = {"tools": [{"name": "write", "description": "Synthetic test increment",
++                                    "inputSchema": {"type": "object", "properties": {
++                                        f"revision{self.schema_revision}": {"type": "boolean"},
++                                    }}}]}
++            elif method == "ping":
++                result = {}
++            elif method == "tools/call":
++                self.effects += 1
++                if self.pause:
++                    self.started.set()
++                    await self.release.wait()
++                if self.drop_after_write:
++                    self.drop_after_write = False
++                    return Response(status_code=503)
++                result = {"content": [{"type": "text", "text": "synthetic-ok"}]}
++            else:
++                return Response(status_code=404)
++        return JSONResponse({"jsonrpc": "2.0", "id": req["id"], "result": result}, headers=headers)
++
++
++@pytest_asyncio.fixture
++async def endpoint():
++    fake = StatefulServer()
++    app = Starlette(routes=[Route("/mcp", fake.handle, methods=["GET", "POST", "DELETE"])])
++    with socket.socket() as sock:
++        sock.bind(("127.0.0.1", 0))
++        url = f"http://127.0.0.1:{sock.getsockname()[1]}/mcp"
++        uv = uvicorn.Server(uvicorn.Config(app, lifespan="off", log_level="error"))
++        task = asyncio.create_task(uv.serve(sockets=[sock]))
++        try:
++            async with asyncio.timeout(4):
++                while not uv.started:
++                    await asyncio.sleep(0.01)
++            yield fake, url
++        finally:
++            uv.should_exit = True
++            await asyncio.wait_for(task, timeout=5)
++
++
++async def connect(url, **options):
++    server = mcp_tool.MCPServerTask("demandtest")
++    config = {"url": url, "skip_preflight": True, "connect_timeout": 3,
++              "protocol": "legacy", "sampling": {"enabled": False}, "elicitation": {"enabled": False}}
++    await asyncio.wait_for(server.start(config | options), timeout=5)
++    return server
++
++
++async def write(server):
++    async def call():
++        async with server._rpc_lock:
++            return await server.session.call_tool("write")
++    return await server._call_on_demand(call)
++
++
++@pytest.mark.asyncio
++async def test_dormant_catalog_reconnects_once_for_concurrent_calls(endpoint, monkeypatch):
++    fake, url = endpoint
++    server = await connect(url, on_demand=True, idle_timeout_seconds=0.08)
++    monkeypatch.setitem(mcp_tool._servers, "demandtest", server)
++    try:
++        await asyncio.sleep(0.2)
++        assert server.session is None
++        assert mcp_tool_handlers._make_check_fn("demandtest")()
++        assert [tool.name for tool in server._tools] == ["write"]
++        before = fake.methods.copy()
++        await asyncio.sleep(0.15)
++        assert fake.methods == before
++        fake.pause = True
++        first = asyncio.create_task(write(server))
++        await asyncio.wait_for(fake.started.wait(), timeout=3)
++        second = asyncio.create_task(write(server))
++        await asyncio.sleep(0.12)  # Past idle window; must not cancel active RPC.
++        assert not first.done()
++        fake.release.set()
++        await asyncio.wait_for(asyncio.gather(first, second), timeout=4)
++        assert fake.methods.count("initialize") == 2  # one initial and one shared reconnection
++        assert fake.effects == 2  # each caller exactly once
++    finally:
++        await server.shutdown()
++
++
++@pytest.mark.asyncio
++async def test_pre_dispatch_stale_404_recovers_once_but_failed_write_never_replays(endpoint):
++    fake, url = endpoint
++    server = await connect(url, on_demand=True)
++    try:
++        fake.session += 1  # A returned transport handle can be stale before Hermes's idle timer.
++        await write(server)
++        assert fake.methods.count("initialize") == 2
++        assert fake.effects == 1
++        fake.drop_after_write = True
++        with pytest.raises(DemandOutcomeUncertain):
++            await write(server)
++        assert fake.effects == 2
++        before = fake.methods.count("initialize")
++        await asyncio.sleep(0.12)
++        assert fake.methods.count("initialize") == before  # no unsolicited reconnection
++        await write(server)
++        assert fake.effects == 3
++        assert fake.methods.count("initialize") == before + 1
++    finally:
++        await server.shutdown()
++
++
++@pytest.mark.asyncio
++async def test_unflagged_streamable_session_retains_existing_lifecycle(endpoint):
++    _, url = endpoint
++    server = await connect(url, idle_timeout_seconds=0.04)
++    try:
++        await asyncio.sleep(0.12)
++        assert server.session is not None
++        assert not server._uses_on_demand_http()
++    finally:
++        await server.shutdown()
++
++
++@pytest.mark.asyncio
++async def test_cancelled_write_is_not_replayed(endpoint):
++    fake, url = endpoint
++    server = await connect(url, on_demand=True)
++    try:
++        fake.pause = True
++        task = asyncio.create_task(write(server))
++        await asyncio.wait_for(fake.started.wait(), timeout=3)
++        task.cancel()
++        with pytest.raises(asyncio.CancelledError):
++            await task
++        fake.release.set()
++        await asyncio.sleep(0.12)
++        assert fake.effects == 1
++        assert fake.methods.count("initialize") == 1
++        await write(server)
++        assert fake.effects == 2
++        assert fake.methods.count("initialize") == 2
++    finally:
++        fake.release.set()
++        await server.shutdown()
++
++
++@pytest.mark.asyncio
++async def test_reconnect_rejects_old_catalog_contract_before_dispatch(endpoint, monkeypatch):
++    fake, url = endpoint
++    server = await connect(url, on_demand=True, idle_timeout_seconds=0.08)
++    monkeypatch.setitem(mcp_tool._servers, "demandtest", server)
++    monkeypatch.setattr(mcp_tool_handlers, "_trust_gate_check", lambda *args: None)
++    monkeypatch.setattr(mcp_tool_handlers, "_check_circuit_breaker", lambda name: None)
++    monkeypatch.setattr(mcp_tool_handlers, "_acquire_call_server", lambda *args: (server, None))
++    loop = asyncio.get_running_loop()
++    monkeypatch.setattr(mcp_tool_handlers._loop, "_run_on_mcp_loop",
++                        lambda call, timeout: asyncio.run_coroutine_threadsafe(call(), loop).result(timeout))
++    handler = mcp_tool_handlers._make_tool_handler("demandtest", "write", 3)
++    try:
++        await asyncio.sleep(0.2)
++        fake.schema_revision = 2
++        result = await asyncio.to_thread(handler, {})
++        assert "tool contract changed" in result
++        assert fake.effects == 0
++        result = await asyncio.to_thread(handler, {})
++        assert "synthetic-ok" in result
++        assert fake.effects == 1
++    finally:
++        await server.shutdown()
++
++
++@pytest.mark.asyncio
++async def test_first_discovery_failure_does_not_poll_and_explicit_reload_recovers(endpoint):
++    fake, url = endpoint
++    fake.unavailable = True
++    server = mcp_tool.MCPServerTask("demandtest")
++    config = {"url": url, "protocol": "legacy", "on_demand": True, "connect_timeout": 2}
++    try:
++        with pytest.raises(Exception, match="503"):
++            await asyncio.wait_for(server.start(config), timeout=3)
++        assert fake.methods == ["initialize"]
++        await asyncio.sleep(0.12)
++        assert fake.methods == ["initialize"]
++    finally:
++        await server.shutdown()
++
++    fake.unavailable = False
++    repaired = await connect(url, on_demand=True)
++    try:
++        assert [tool.name for tool in repaired._tools] == ["write"]
++        await write(repaired)
++        assert fake.effects == 1
++    finally:
++        await repaired.shutdown()
++
++
++@pytest.mark.asyncio
++async def test_changed_endpoint_identity_is_not_contacted_on_old_catalog(endpoint):
++    fake, url = endpoint
++    server = await connect(url, on_demand=True, idle_timeout_seconds=0.08)
++    try:
++        await asyncio.sleep(0.2)
++        before = fake.methods.copy()
++        server._config["url"] = url + "?another-endpoint"
++        with pytest.raises(RuntimeError, match="could not connect"):
++            await write(server)
++        assert fake.methods == before
++        assert fake.effects == 0
++    finally:
++        await server.shutdown()
+diff --git a/tools/mcp_tool.py b/tools/mcp_tool.py
+index bd29e0f8..3cb122b0 100644
+--- a/tools/mcp_tool.py
++++ b/tools/mcp_tool.py
+@@ -322,6 +322,12 @@ class MCPServerTask(MCPServerRunMixin, MCPServerTransportMixin, MCPServerHealthM
+         "_error",
+         "_ever_connected",
+         "_idle_timeout_seconds",
++        "_demand_idle_seconds",
++        "_demand_request",
++        "_demand_connect",
++        "_demand_call_lock",
++        "_demand_catalog_identity",
++        "_demand_catalog_dirty",
+         "_inflight_tasks",
+         "_last_park_line",
+         "_last_tool_call_at",
+@@ -434,6 +440,12 @@ class MCPServerTask(MCPServerRunMixin, MCPServerTransportMixin, MCPServerHealthM
+         self._pending_call_context: Optional[contextvars.Context] = None
+         self._lifecycle_started_at = self._last_tool_call_at = time.monotonic()
+         self._idle_timeout_seconds = self._max_lifetime_seconds = self._recycled_reason = None
++        self._demand_idle_seconds: float = 0.0
++        self._demand_request = asyncio.Event()
++        self._demand_connect: Optional[asyncio.Future] = None
++        self._demand_call_lock = asyncio.Lock()
++        self._demand_catalog_identity = None
++        self._demand_catalog_dirty = False
+         # Handshake InitializeResult: the server's REAL advertised capabilities.
+         # Captures the ``InitializeResult`` returned by ``await session.initialize()`` so downstream code
+         # can inspect the server's real advertised capabilities (``.capabilities.resources``,
+diff --git a/tools/mcp_tool_discovery.py b/tools/mcp_tool_discovery.py
+index 3eb3657d..7fdf9c10 100644
+--- a/tools/mcp_tool_discovery.py
++++ b/tools/mcp_tool_discovery.py
+@@ -29,6 +29,11 @@ logger = logging.getLogger("tools.mcp_tool")
+ _DISCOVERY_CONNECT_CONCURRENCY = 4
+ 
+ 
++def _uses_demand(server) -> bool:
++    seconds = getattr(server, "_demand_idle_seconds", 0)
++    return type(seconds) in (int, float) and seconds > 0
++
++
+ def _discovery_connect_concurrency() -> int:
+     """``mcp.discovery_concurrency`` from config (0 = unlimited); a non-integer or negative value
+     warns and falls back to the default rather than silently running unbounded."""
+@@ -213,7 +218,7 @@ def _resolve_server_lazy(name: str, config: dict) -> bool:
+     Gated per-server by ``mcp_servers.<name>.lazy`` in config (default OFF), following the same per-server
+     key pattern as ``idle_timeout_seconds``. Design from #56832 (Vansh5632).
+     """
+-    return _parse_boolish(config.get("lazy", False), default=False)
++    return config.get("on_demand") is not True and _parse_boolish(config.get("lazy", False), default=False)
+ 
+ 
+ def _note_connect_failure(name: str, exc: BaseException) -> str:
+@@ -377,7 +382,8 @@ def _select_new_servers(servers: dict[str, dict]) -> dict[str, dict]:
+             and mcp_server_enabled(v) and not _connect_cooldown_active(k)}
+         stale_cached = [_core._servers[keys[k]] for k, v in servers.items()
+                         if keys[k] in _core._servers and mcp_server_enabled(v)
+-                        and getattr(_core._servers[keys[k]], "session", None) is None]
++                        and getattr(_core._servers[keys[k]], "session", None) is None
++                        and not _uses_demand(_core._servers[keys[k]])]
+         for srv_name in new_servers:
+             _core._server_connecting.add(keys[srv_name])
+             _core._server_scope_keys[keys[srv_name]] = current_scope
+@@ -859,10 +865,12 @@ def get_mcp_status(configured: Optional[dict[str, dict]] = None, *, include_runt
+         enabled = mcp_server_enabled(cfg)  # evaluated unconditionally: malformed values warn even when connected
+         server = active_servers.get(name)
+         live = server is not None and server.session is not None
++        dormant = (not live and server is not None and _uses_demand(server)
++                   and server._ever_connected)
+         # An in-flight or failed first-use connect outranks "lazy": that server is no longer
+         # merely waiting to be spawned, and the error is the actionable part.
+         status = ("connected" if live else "disabled" if not enabled else "connecting" if name in connecting
+-                  else "failed" if name in connect_errors else "lazy" if name in lazy_tools else "configured")
++                  else "failed" if name in connect_errors else "lazy" if dormant or name in lazy_tools else "configured")
+         entry = {"name": name, "transport": cfg.get("transport", "http") if "url" in cfg else "stdio",
+                  "tools": 0, "connected": False, "disabled": status == "disabled", "status": status}
+         if live:
+@@ -874,7 +882,7 @@ def get_mcp_status(configured: Optional[dict[str, dict]] = None, *, include_runt
+         elif status == "failed":
+             entry["error"] = connect_errors[name]
+         elif status == "lazy":
+-            entry["tools"] = lazy_tools[name]
++            entry["tools"] = len(server._registered_tool_names) if dormant else lazy_tools[name]
+         result.append(entry)
+     return result
+ 
+@@ -889,7 +897,8 @@ def mcp_server_reconnecting(name: str) -> bool:
+     state; never connects."""
+     with _core._lock:
+         server = _core._servers.get(_resolve_server_key(name))
+-    if server is None or server.session is not None or not server._ever_connected:
++    if (server is None or server.session is not None or not server._ever_connected
++            or _uses_demand(server)):
+         return False
+     if server._park_reason and "permanent" in server._park_reason:
+         return False
+diff --git a/tools/mcp_tool_handlers.py b/tools/mcp_tool_handlers.py
+index b1a4ad7c..c2de2ac9 100644
+--- a/tools/mcp_tool_handlers.py
++++ b/tools/mcp_tool_handlers.py
+@@ -17,6 +17,7 @@ from tools.registry import invalidate_check_fn_cache, tool_error
+ from tools.ansi_strip import strip_unicode_tags
+ from tools.mcp_tool_common import _exc_str, _sanitize_error, mcp_field, _core
+ from tools import mcp_tool_loop as _loop
++from tools.mcp_tool_server_run import DemandOutcomeUncertain
+ from tools.mcp_tool_content import (
+     _MCP_HARD_RESULT_CAP_CHARS, _cache_mcp_audio_block, _cache_mcp_image_block, _mcp_result_with_native_images,
+     _render_mcp_dropped_block_notice, _render_mcp_resource_block, _strip_reserved_meta_keys,
+@@ -49,6 +50,11 @@ _SESSION_OUTCOME_UNCERTAIN_MSG = (
+     "with a read-only tool) before re-invoking it.")
+ 
+ 
++def _uses_demand(server) -> bool:
++    seconds = getattr(server, "_demand_idle_seconds", 0)
++    return type(seconds) in (int, float) and seconds > 0
++
++
+ def _tool_is_read_only(server_name: str, tool_name: str) -> bool:
+     """True only when discovery captured ``readOnlyHint=True`` for the tool. Missing or malformed
+     metadata fails safe to False (treated as write-capable). readOnlyHint is a property of the
+@@ -253,7 +259,8 @@ def _acquire_call_server(server_name: str, tool_timeout: float):
+         )
+     server = _discovery._get_connected_server_for_call(server_name)
+     wait = min(5.0, float(tool_timeout or 5.0))
+-    if server and (server.session or _loop._wait_for_server_session_ready(server, timeout=wait)):
++    if server and (_uses_demand(server) or server.session
++                   or _loop._wait_for_server_session_ready(server, timeout=wait)):
+         return server, None
+     _core._bump_server_error(server_name)
+     if server and _loop._signal_reconnect(server):
+@@ -448,7 +455,8 @@ def _handle_stdio_child_exited_and_retry(server_name: str, exc: Exception, retry
+ 
+ 
+ def _dispatch(server_name: str, server: Any, op: str, call, tool_timeout: float, recoverers,
+-              on_final_failure: Callable[[BaseException], None], record_outcome: bool = False) -> str:
++              on_final_failure: Callable[[BaseException], None], record_outcome: bool = False,
++              on_demand: bool = False) -> str:
+     """Mark the call started on *server* (doubles may lack ``mark_tool_call``), run coroutine function *call*
+     on the MCP loop and, on failure, walk ``recoverers`` (``(server_name, exc, retry_call, op) -> Optional[str]``,
+     None = not its kind; order matters). Unrecovered exceptions go through ``on_final_failure`` and become the
+@@ -463,8 +471,20 @@ def _dispatch(server_name: str, server: Any, op: str, call, tool_timeout: float,
+         result = call_once()
+         return _record_call_outcome(server_name, result) if record_outcome else result
+     except InterruptedError:
++        if on_demand:
++            return tool_error("MCP call interrupted. If it reached the server, it may have completed; "
++                              "check its effect before retrying.", outcome_uncertain=True)
+         return tool_error("MCP call interrupted: user sent a new message")
++    except DemandOutcomeUncertain as exc:
++        on_final_failure(exc)
++        return tool_error(f"MCP server '{server_name}' lost the response after dispatch. The operation may "
++                          "have completed and was not replayed. Check its effect before retrying.",
++                          outcome_uncertain=True)
+     except Exception as exc:
++        if on_demand and isinstance(exc, TimeoutError):
++            on_final_failure(exc)
++            return tool_error("MCP call timed out. If it reached the server, it may have completed; "
++                              "check its effect before retrying.", outcome_uncertain=True)
+         for recover in recoverers:
+             recovered = recover(server_name, exc, call_once, op)
+             if recovered is not None:
+@@ -689,6 +709,15 @@ def _render_call_tool_result(result, server_name: str, image_paths: Optional[lis
+         return json.dumps({"result": text_result}, ensure_ascii=False)
+ 
+ 
++def _demand_tool_contract(tool):
++    def as_dict(value):
++        return value.model_dump(exclude_none=True) if hasattr(value, "model_dump") else value
++    return json.dumps(
++        [mcp_field(tool, "input_schema", "inputSchema"), as_dict(getattr(tool, "annotations", None))],
++        sort_keys=True,
++    )
++
++
+ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *, native_images: bool = False):
+     """Sync handler (``handler(args_dict, **kwargs)``) calling an MCP tool via the background loop. Always a JSON
+     string, except with ``native_images`` (the registry handler the agent loop dispatches): a result carrying
+@@ -699,6 +728,13 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *,
+     def _handler(args: dict, **kwargs) -> Any:
+         # Security boundary: untrusted-server write tools need approval before ANY transport work (incl. lazy spawn).
+         booked: list = []  # a costed call's charge; refunded when the call never reaches the server
++        # Snapshot before trust evaluation so a concurrent catalog refresh cannot
++        # silently turn consent for the old operation into consent for the new one.
++        from tools.mcp_tool_scope import _resolve_server_key
++        with _core._lock:
++            live = _core._servers.get(_resolve_server_key(server_name))
++        snapshot = (next((t for t in live._tools if t.name == tool_name), None)
++                    if _uses_demand(live) else None)
+         error = _trust_gate_check(server_name, tool_name, booked, args)
+         if error is not None:
+             return error
+@@ -712,6 +748,22 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *,
+         # Only a tool annotated readOnlyHint=True is replayed after session expiry; a 401 is always
+         # pre-dispatch so the auth recoverer keeps its retry for every tool.
+         read_only = _tool_is_read_only(server_name, tool_name)
++        on_demand = _uses_demand(server)
++        if on_demand:
++            advertised = snapshot or next((t for t in server._tools if t.name == tool_name), None)
++            if advertised is None:
++                for charge in booked:
++                    charge.refund()
++                return tool_error("The MCP tool is absent from the current catalog.")
++            expected = _demand_tool_contract(advertised)
++            expected_identity = server._resolved_identity
++
++            def validate():
++                current = next((t for t in server._tools if t.name == tool_name), None)
++                if (current is None or _demand_tool_contract(current) != expected
++                        or server._resolved_identity != expected_identity):
++                    raise RuntimeError("The MCP endpoint or tool contract changed; refresh tools before calling")
++
+         image_paths: list[str] = []  # the LAST attempt's cached images (a recoverer may retry _call)
+         # Read on the agent's thread: the coroutine below runs on the MCP loop, outside this context.
+         from agent.tool_progress_relay import current_tool_progress
+@@ -738,10 +790,13 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *,
+             _core._bump_server_error(server_name)
+             logger.error("MCP tool %s/%s call failed: %s", server_name, tool_name, exc)
+         session_expired = partial(_handle_session_expired_and_retry, call_may_have_side_effects=not read_only)
++        async def _call_lazy():
++            return await server._call_on_demand(_call, validate=validate)
++
+         text = _dispatch(
+-            server_name, server, op, _call, tool_timeout,
+-            (_handle_stdio_child_exited_and_retry, _handle_auth_error_and_retry, session_expired),
+-            _on_failure, record_outcome=True)
++            server_name, server, op, _call_lazy if on_demand else _call, tool_timeout,
++            () if on_demand else (_handle_stdio_child_exited_and_retry, _handle_auth_error_and_retry, session_expired),
++            _on_failure, record_outcome=True, on_demand=on_demand)
+         # Off the MCP loop on purpose: image prep is CPU work (bounded vision pool) that must not stall other servers' I/O.
+         return _mcp_result_with_native_images(text, image_paths) if native_images and not _result_is_error(text) else text
+     return _handler
+@@ -755,7 +810,8 @@ def _make_utility_handler(op: str, log_label: str, rpc, render, required: Option
+         def _handler(args: dict, **kwargs) -> str:
+             from tools import mcp_tool_discovery as _discovery  # lazy: import cycle
+             server = _discovery._get_connected_server_for_call(server_name)
+-            if not server or not server.session:
++            on_demand = _uses_demand(server)
++            if not server or (not server.session and not on_demand):
+                 return tool_error(f"MCP server '{server_name}' is not connected")
+             if required and not args.get(required):
+                 return tool_error(f"Missing required parameter '{required}'")
+@@ -764,10 +820,14 @@ def _make_utility_handler(op: str, log_label: str, rpc, render, required: Option
+                 async with server._rpc_lock:
+                     result = await rpc(server.session, args, server_name)
+                 return json.dumps(render(result, server_name), ensure_ascii=False)
++            async def _call_lazy():
++                return await server._call_on_demand(_call)
++
+             return _dispatch(
+-                server_name, server, op, _call, tool_timeout,
+-                (_handle_auth_error_and_retry, _handle_session_expired_and_retry),
+-                lambda exc: logger.error("MCP %s/%s failed: %s", server_name, log_label, exc))
++                server_name, server, op, _call_lazy if on_demand else _call, tool_timeout,
++                () if on_demand else (_handle_auth_error_and_retry, _handle_session_expired_and_retry),
++                lambda exc: logger.error("MCP %s/%s failed: %s", server_name, log_label, exc),
++                on_demand=on_demand)
+         return _handler
+     return _factory
+ 
+@@ -857,7 +917,8 @@ def _make_check_fn(server_name: str):
+         with _core._lock:
+             key = _resolve_server_key(server_name)
+             server = _core._servers.get(key)
+-            return ((server is not None and (server.session is not None or server._is_recycled_stdio()))
++            return ((server is not None and (server.session is not None or server._is_recycled_stdio()
++                    or (_uses_demand(server) and server._ever_connected)))
+                     or key in _core._lazy_server_configs)
+ 
+     def _check() -> bool:
+diff --git a/tools/mcp_tool_health.py b/tools/mcp_tool_health.py
+index ace50d4b..32abf7ad 100644
+--- a/tools/mcp_tool_health.py
++++ b/tools/mcp_tool_health.py
+@@ -110,6 +110,9 @@ class MCPServerHealthMixin:
+                 payload = getattr(message, "root", message)
+                 if isinstance(payload, _core.ToolListChangedNotification):
+                     logger.info("MCP server '%s': received tools/list_changed notification", self.name)
++                    if getattr(self, "_demand_idle_seconds", 0):
++                        self._demand_catalog_dirty = True
++                        return
+                     # Separate task: refreshing synchronously inside the handler can wedge the stdio
+                     # JSON-RPC stream when list_changed arrives while another request is in flight.
+                     self._schedule_tools_refresh()
+diff --git a/tools/mcp_tool_registration.py b/tools/mcp_tool_registration.py
+index 2e457bad..6eb98cd6 100644
+--- a/tools/mcp_tool_registration.py
++++ b/tools/mcp_tool_registration.py
+@@ -472,7 +472,8 @@ def _connection_identity(config: dict) -> tuple:
+ 
+     return (config_fingerprint(config), _frozen(config.get("env")), _frozen(config.get("headers")),
+             _auth_type(config), _frozen(config.get("client_cert")), _frozen(config.get("client_key")),
+-            config.get("ssl_verify", True), bool(config.get("strict_redirect_headers")))
++            config.get("ssl_verify", True), bool(config.get("strict_redirect_headers")),
++            (True, _frozen(config.get("idle_timeout_seconds"))) if config.get("on_demand") is True else (False,))
+ 
+ 
+ def _auth_type(config: dict) -> str:
+diff --git a/tools/mcp_tool_server_run.py b/tools/mcp_tool_server_run.py
+index 10141145..84a38b43 100644
+--- a/tools/mcp_tool_server_run.py
++++ b/tools/mcp_tool_server_run.py
+@@ -16,6 +16,10 @@ from tools import mcp_tool_sampling as _sampling
+ logger = logging.getLogger("tools.mcp_tool")
+ 
+ 
++class DemandOutcomeUncertain(RuntimeError):
++    """Network/protocol failure after MCP dispatch: never authorize a replay."""
++
++
+ @dataclass
+ class _RetryBudget:
+     """Per-run() retry counters (``_reconnect_retries`` stays on the task: handlers/tests read it)."""
+@@ -55,6 +59,127 @@ class MCPServerRunMixin:
+         async with self._rpc_lock:
+             pass
+ 
++    def _uses_on_demand_http(self) -> bool:
++        return self._demand_idle_seconds > 0
++
++    async def _wait_for_demand_lifecycle(self) -> str:
++        """Close idle HTTP transport without network liveness traffic."""
++        shutdown, reconnect = self._event_waiters()
++        rpc_idle = None
++        try:
++            while not self._shutdown_event.is_set():
++                if self._reconnect_event.is_set():
++                    self._reconnect_event.clear()
++                    return "reconnect"
++                if self._rpc_lock.locked():
++                    rpc_idle = asyncio.create_task(self._wait_for_rpc_idle())
++                    await asyncio.wait((shutdown, reconnect, rpc_idle),
++                                       return_when=asyncio.FIRST_COMPLETED)
++                    await self._cancel_waiters(rpc_idle)
++                    rpc_idle = None
++                else:
++                    remaining = self._last_tool_call_at + self._demand_idle_seconds - time.monotonic()
++                    if remaining <= 0:
++                        return "recycle"
++                    await asyncio.wait((shutdown, reconnect), timeout=remaining,
++                                       return_when=asyncio.FIRST_COMPLETED)
++            return "shutdown"
++        finally:
++            self._ready.clear()
++            self.session = None
++            await self._cancel_waiters(shutdown, reconnect, *([rpc_idle] if rpc_idle else []))
++
++    async def _run_on_demand(self, config: dict) -> None:
++        """One initial catalog discovery, then one connection attempt per explicit demand."""
++        while not self._shutdown_event.is_set():
++            if self._ever_connected:
++                shutdown = asyncio.create_task(self._shutdown_event.wait())
++                demand = asyncio.create_task(self._demand_request.wait())
++                try:
++                    await asyncio.wait((shutdown, demand), return_when=asyncio.FIRST_COMPLETED)
++                finally:
++                    await self._cancel_waiters(shutdown, demand)
++                if self._shutdown_event.is_set():
++                    if self._demand_connect is not None and not self._demand_connect.done():
++                        self._demand_connect.set_result(False)
++                    return
++            self._demand_request.clear()
++            pending = self._demand_connect
++            self._reconnect_event.clear()
++            try:
++                self._demand_catalog_dirty = False
++                await self._run_http(config)
++            except Exception as exc:
++                if not self._ever_connected:
++                    self._publish_error(exc)
++                    return
++                logger.warning("MCP server '%s': on-demand transport unavailable (%s)",
++                               self.name, type(exc).__name__)
++            finally:
++                if pending and not pending.done():
++                    pending.set_result(False)
++                self.session = None
++                if self._ever_connected:
++                    self._ready.clear()
++            if not self._ever_connected:
++                self._publish_error(RuntimeError(f"MCP server '{self.name}' did not finish discovery"))
++                return
++
++    async def _ensure_demand_session(self, timeout: float) -> tuple[object, bool]:
++        if self.session is not None and self._ready.is_set():
++            return self.session, False
++        if self._shutdown_event.is_set() or self._task is None or self._task.done():
++            raise RuntimeError(f"MCP server '{self.name}' is not running")
++        if self._demand_connect is None or self._demand_connect.done():
++            self._demand_connect = asyncio.get_running_loop().create_future()
++            self._demand_request.set()
++        ready = await asyncio.wait_for(asyncio.shield(self._demand_connect), timeout=timeout)
++        if not ready or self.session is None or not self._ready.is_set():
++            raise RuntimeError(f"MCP server '{self.name}' could not connect on demand")
++        return self.session, True
++
++    async def _call_on_demand(self, call, *, validate=None):
++        """Refresh liveness before dispatch; never replay a dispatched operation."""
++        connect_timeout = float(self._config.get("connect_timeout", _core._DEFAULT_CONNECT_TIMEOUT))
++        async with self._demand_call_lock:
++            # At most one retry, and only of the read-only pre-dispatch ping.
++            for attempt in range(2):
++                session, fresh = await self._ensure_demand_session(connect_timeout)
++                async with self._rpc_lock:
++                    if self.session is not session or not self._ready.is_set():
++                        continue
++                    if getattr(self, "_demand_catalog_dirty", False):
++                        self._ready.clear()
++                        self._reconnect_event.set()
++                        continue
++                    if not fresh:
++                        try:
++                            await asyncio.wait_for(self._keepalive_probe(), timeout=min(5.0, connect_timeout))
++                        except Exception as exc:
++                            self._ready.clear()
++                            self._reconnect_event.set()
++                            if attempt:
++                                raise RuntimeError(f"MCP server '{self.name}' failed its pre-call liveness check") from exc
++                            continue
++                    if validate is not None:
++                        validate()
++                    self.mark_tool_call()
++                try:
++                    return await call()
++                except asyncio.CancelledError:
++                    self._ready.clear()
++                    self._reconnect_event.set()
++                    raise
++                except Exception as exc:
++                    # A dispatched request may have changed remote state. A
++                    # later *independent* call can recover, but never replay it.
++                    self._ready.clear()
++                    self._reconnect_event.set()
++                    raise DemandOutcomeUncertain(str(exc)) from exc
++                finally:
++                    self.mark_tool_call()
++            raise RuntimeError(f"MCP server '{self.name}' lost its transport before dispatch")
++
+     async def _wait_for_lifecycle_event(self) -> str:
+         """Serve until a lifecycle event: ``"shutdown"`` (exits run), ``"reconnect"`` (session torn
+         down, transport re-entered; event cleared first) or ``"recycle"`` (stdio idle/lifetime
+@@ -64,6 +189,8 @@ class MCPServerRunMixin:
+         below the server's session TTL) so idle TCP/session state never goes stale (#17003);
+         stdio does so only when explicitly configured. A keepalive failure triggers a reconnect.
+         """
++        if self._uses_on_demand_http():
++            return await self._wait_for_demand_lifecycle()
+         is_http = self._is_http()
+         configured = self._config.get("keepalive_interval")
+         keepalive_interval = None
+@@ -263,6 +390,19 @@ class MCPServerRunMixin:
+         self._auth_type = (config.get("auth") or "").lower().strip()
+         self._idle_timeout_seconds = _get_lifecycle_seconds(config, "idle_timeout_seconds")
+         self._max_lifetime_seconds = _get_lifecycle_seconds(config, "max_lifetime_seconds")
++        on_demand = config.get("on_demand", False)
++        if not isinstance(on_demand, bool):
++            self._publish_error(ValueError("MCP on_demand must be true or false"))
++            return False
++        if on_demand:
++            if not self._is_http() or config.get("transport") == "sse":
++                self._publish_error(ValueError("MCP on_demand requires Streamable HTTP"))
++                return False
++            if self._auth_type == "oauth":
++                self._publish_error(ValueError("MCP on_demand does not support interactive OAuth"))
++                return False
++            idle = _get_lifecycle_seconds(config, "idle_timeout_seconds")
++            self._demand_idle_seconds = idle if idle is not None else 10.0
+         # The _MCP_*_TYPES flags are False until the lazy SDK import runs.
+         _core._ensure_mcp_sdk()
+         sampling_config = config.get("sampling", {})
+@@ -285,7 +425,7 @@ class MCPServerRunMixin:
+             # web-app root returns HTML and would hang the SDK for connect_timeout. Skipped once
+             # _ready was ever set and for OAuth servers (a token-less probe sees HTML/401).
+             from tools.mcp_liveness import liveness_for
+-            if (config.get("transport") != "sse" and not config.get("skip_preflight")
++            if (not self._uses_on_demand_http() and config.get("transport") != "sse" and not config.get("skip_preflight")
+                     and liveness_for(self.name).kind != "server_json"
+                     and not self._ready.is_set() and self._auth_type != "oauth"):
+                 await self._preflight_content_type(
+@@ -333,6 +473,9 @@ class MCPServerRunMixin:
+         revivable. Branch helpers return True to keep looping, False to exit."""
+         if not await self._prepare_run(config):
+             return
++        if self._uses_on_demand_http():
++            await self._run_on_demand(config)
++            return
+         self._reconnect_retries = 0
+         budget = _RetryBudget()
+         rebuild = False
+diff --git a/tools/mcp_tool_transport.py b/tools/mcp_tool_transport.py
+index 32a70d28..c90172ca 100644
+--- a/tools/mcp_tool_transport.py
++++ b/tools/mcp_tool_transport.py
+@@ -260,9 +260,22 @@ class MCPServerTransportMixin:
+         self.session = session
+         if mark_lifecycle:
+             self._mark_lifecycle_started()
+-        await self._discover_tools()
++        if self._uses_on_demand_http():
++            previous_tools = self._tools
++            previous_registered = list(self._registered_tool_names)
++            await asyncio.wait_for(self._discover_tools(), timeout=connect_timeout)
++            if previous_registered and self._tools != previous_tools:
++                names = _registration._register_server_tools(self.name, self, self._config)
++                self._deregister_owned(set(previous_registered) - set(names))
++                self._registered_tool_names = names
++            self._demand_catalog_identity = self._resolved_identity
++            self.mark_tool_call()
++        else:
++            await self._discover_tools()
+         self._ready.set()
+         self._ever_connected = True
++        if self._uses_on_demand_http() and self._demand_connect is not None and not self._demand_connect.done():
++            self._demand_connect.set_result(True)
+         _core._reset_server_error(self.name)
+         # Session is live again: clear any breaker state from a prior outage so the first call after
+         # recovery isn't gated on a stale consecutive-failure count (#16788).
+@@ -280,7 +293,8 @@ class MCPServerTransportMixin:
+         # recovery isn't gated on a stale consecutive-failure count (#16788).
+         # Unproven until keepalive/tool-call success (#62212).
+         self._session_proven = False
+-        events_task = _events.start_refresh_task(self)
++        # On-demand servers do not own an always-on server notification feed.
++        events_task = None if self._uses_on_demand_http() else _events.start_refresh_task(self)
+         try:
+             reason = await self._wait_for_lifecycle_event()
+         finally:
+@@ -565,6 +579,8 @@ class MCPServerTransportMixin:
+         """Streamable HTTP context manager: mcp >= 1.24.0 gets a caller-owned httpx client; on the
+         deprecated API (mcp < 1.24.0) the SDK owns the client."""
+         if not _core._MCP_NEW_HTTP:
++            if self._uses_on_demand_http():
++                raise ImportError("MCP on_demand requires mcp >= 1.24.0")
+             if strict_cfg_headers:  # fail closed: without an owned client redirects can't be hooked
+                 raise ImportError(f"MCP server '{self.name}' requires mcp >= 1.24.0 to "
+                                   "enforce the portable redirect-header boundary "
+@@ -579,7 +595,7 @@ class MCPServerTransportMixin:
+         # verify/cert live on the inner transport: a custom transport= makes client-level TLS kwargs
+         # inert — and suppresses httpx's own proxy auto-detection, hence the explicit mounts=.
+         inner_transport = httpx.AsyncHTTPTransport(verify=ssl_verify, **_present(cert=client_cert))
+-        client_kwargs: dict = {"follow_redirects": True, "timeout": httpx.Timeout(float(connect_timeout), read=300.0),
++        client_kwargs: dict = {"follow_redirects": not self._uses_on_demand_http(), "timeout": httpx.Timeout(float(connect_timeout), read=300.0),
+                                **({"headers": headers} if headers else {}),
+                                "event_hooks": {"response": [_make_http_rejection_recorder(self._http_rejection)]},
+                                "transport": _make_mcp_body_cap_transport(httpx, inner_transport),
+@@ -609,7 +625,13 @@ class MCPServerTransportMixin:
+         inputs, configured_header_names = _connect_inputs(self.name, config)
+         # Hash the endpoint this attempt connects to: a second read of the runtime file could
+         # publish another endpoint's identity alongside this session.
+-        self._resolved_identity = _registration._identity_digest(inputs)
++        identity = _registration._identity_digest(inputs)
++        # A dynamic endpoint/credential change must be explicitly reloaded, not
++        # reached on an old tool offer or consent. Check before any network I/O.
++        if (self._uses_on_demand_http() and self._demand_catalog_identity is not None
++                and identity != self._demand_catalog_identity):
++            raise ValueError("On-demand MCP endpoint or credentials changed; reload its configuration")
++        self._resolved_identity = identity
+         url, headers = inputs
+         logger.debug("MCP server '%s': connecting to %s", self.name, url)
+         self._http_rejection = {}  # last 4xx/5xx the owned client saw this attempt (recorder hook)
+@@ -644,7 +666,7 @@ class MCPServerTransportMixin:
+             # transport must not silently switch transports), never on a timeout (not a
+             # transport mismatch — ``_is_streamable_http_rejection`` matches neither), and never
+             # with ``strict_redirect_headers`` (SSE cannot enforce that boundary).
+-            if (self._ever_connected or common[-1] or not _is_streamable_http_rejection(exc)):
++            if (self._uses_on_demand_http() or self._ever_connected or common[-1] or not _is_streamable_http_rejection(exc)):
+                 if http_detail != str(_unwrap_exception_group(exc)):  # opaque SDK error + a recorded rejection
+                     raise ConnectionError(f"MCP server '{self.name}': Streamable HTTP connect failed "
+                                           f"({http_detail})") from exc
