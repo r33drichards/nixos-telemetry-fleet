@@ -1,6 +1,7 @@
 """Import/configuration qualification only. Never construct a cloud sandbox."""
 import importlib.metadata
 import os
+import subprocess
 import sys
 
 
@@ -11,6 +12,23 @@ def forbid_network(event, args):
 
 sys.addaudithook(forbid_network)
 assert not any(name in os.environ for name in ('MODAL_TOKEN_ID', 'MODAL_TOKEN_SECRET'))
+
+# Import each module first in an isolated interpreter: the usual aggregate
+# import can mask a circular dependency by initializing its modules in order.
+import_smoke = '''
+import importlib
+import sys
+
+def forbid_network(event, args):
+    if event in {'socket.connect', 'socket.getaddrinfo', 'socket.sendto'}:
+        raise RuntimeError('Network is forbidden in the Hermes import qualification')
+
+sys.addaudithook(forbid_network)
+importlib.import_module(sys.argv[1])
+'''
+for module in ('tools.mcp_tool_server_run', 'tools.mcp_tool_handlers', 'tools.mcp_tool_registration'):
+    subprocess.run([sys.executable, '-c', import_smoke, module], check=True, timeout=10)
+print('Installed MCP module imports passed in clean interpreters')
 import modal
 from tools.environments.modal import ModalEnvironment
 from tools.tool_backend_helpers import resolve_modal_backend_state
