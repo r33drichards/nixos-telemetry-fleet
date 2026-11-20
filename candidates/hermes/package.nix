@@ -8,9 +8,9 @@ let
     callPackage = path: args: pkgs.callPackage path (args //
       pkgs.lib.optionalAttrs (toString path == toString (hermes + "/nix/python.nix")) {
         pythonSrc = pkgs.applyPatches {
-          name = "hermes-modal-timeout-source";
+          name = "hermes-modal-on-demand-source";
           src = args.pythonSrc;
-          patches = [ ./modal-timeout.patch ];
+          patches = [ ./modal-timeout.patch ./mcp-on-demand-http.patch ];
         };
       });
   };
