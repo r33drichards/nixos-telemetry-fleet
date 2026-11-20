@@ -1,0 +1,79 @@
+name: Publish qualified Hermes runtime
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'candidates/hermes/**'
+      - '.github/workflows/hermes-build.yml'
+      - '.github/workflows/hermes-runtime-publish.yml'
+      - 'scripts/hermes-runtime-publish.sh'
+      - 'scripts/hermes-runtime-identity.py'
+      - 'tests/test_hermes_runtime_publish.py'
+permissions:
+  contents: read
+concurrency:
+  group: hermes-runtime-publish-main
+  cancel-in-progress: false
+jobs:
+  qualify:
+    if: >-
+      vars.HERMES_RUNTIME_PUBLISH_ARMED == 'enabled' &&
+      github.repository == 'r33drichards/nixos-telemetry-fleet' &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/hermes-build.yml
+  publish:
+    needs: qualify
+    if: >-
+      vars.HERMES_RUNTIME_PUBLISH_ARMED == 'enabled' &&
+      github.repository == 'r33drichards/nixos-telemetry-fleet' &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: hermes-runtime-cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      HERMES_RUNTIME_PUBLISH: ${{ vars.HERMES_RUNTIME_PUBLISH }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.30.2/install
+          extra_nix_config: |
+            sandbox = true
+      - name: Check publication guards
+        run: python3 -m unittest discover -s tests -p test_hermes_runtime_publish.py -v
+      - name: Rebuild without credentials and compare the entire tested closure
+        id: prepare
+        env:
+          QUALIFIED_ROOT: ${{ needs.qualify.outputs.runtime_root }}
+          QUALIFIED_CLOSURE_SHA256: ${{ needs.qualify.outputs.closure_sha256 }}
+        run: bash scripts/hermes-runtime-publish.sh prepare >> "$GITHUB_OUTPUT"
+      - name: Submit only the verified Hermes runtime closure
+        shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+        working-directory: ${{ runner.temp }}
+        env:
+          BASH_ENV: /dev/null
+          CACHIX_AUTH_TOKEN: ${{ secrets.HERMES_RUNTIME_CACHE_WRITE_TOKEN }}
+          VERIFIED_ROOT: ${{ steps.prepare.outputs.root }}
+          VERIFIED_CLOSURE_SHA256: ${{ steps.prepare.outputs.closure_sha256 }}
+          VERIFIED_CACHIX_CLIENT: ${{ steps.prepare.outputs.client }}
+        # No checkout scripts or candidate executables run with the token.
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == r33drichards/nixos-telemetry-fleet && "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$HERMES_RUNTIME_PUBLISH" == enabled && -n "$CACHIX_AUTH_TOKEN" ]]
+          [[ "$VERIFIED_ROOT" =~ ^/nix/store/[0123456789abcdfghijklmnpqrsvwxyz]{32}-[a-zA-Z0-9+._?=-]+$ ]]
+          [[ "$VERIFIED_CLOSURE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$VERIFIED_CACHIX_CLIENT" =~ ^/nix/store/[0123456789abcdfghijklmnpqrsvwxyz]{32}-cachix-[a-zA-Z0-9+._?=-]+/bin/cachix$ ]]
+          [[ -d "$VERIFIED_ROOT" && -x "$VERIFIED_CACHIX_CLIENT" ]]
+          token="$CACHIX_AUTH_TOKEN"
+          unset CACHIX_AUTH_TOKEN
+          HOME=$(/usr/bin/mktemp -d "$RUNNER_TEMP/hermes-cachix.XXXXXXXX")
+          export HOME
+          cd "$HOME"
+          export PATH=/nix/var/nix/profiles/default/bin:/usr/bin:/bin
+          unset CACHIX_SIGNING_KEY CACHIX_CONFIG XDG_CONFIG_HOME
+          export CACHIX_AUTH_TOKEN="$token"
+          exec "$VERIFIED_CACHIX_CLIENT" push r33drichards-hermes-runtime "$VERIFIED_ROOT"

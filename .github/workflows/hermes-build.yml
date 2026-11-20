@@ -1,5 +1,11 @@
 name: Qualify Hermes IRC candidate
 on:
+  workflow_call:
+    outputs:
+      runtime_root:
+        value: ${{ jobs.build.outputs.runtime_root }}
+      closure_sha256:
+        value: ${{ jobs.build.outputs.closure_sha256 }}
   pull_request:
     paths:
       - 'candidates/hermes/**'
@@ -17,13 +23,16 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
+    outputs:
+      runtime_root: ${{ steps.runtime.outputs.root }}
+      closure_sha256: ${{ steps.runtime.outputs.closure_sha256 }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
         with:
           install_url: https://releases.nixos.org/nix/nix-2.30.2/install
@@ -35,6 +44,10 @@ jobs:
         run: nix flake check ./candidates/hermes --no-update-lock-file -L
       - name: Build runtime closure without upload or activation
         run: nix build ./candidates/hermes#default --no-update-lock-file --out-link result-hermes -L
+      - name: Identify the tested Hermes runtime
+        if: github.event_name == 'push'
+        id: runtime
+        run: bash scripts/hermes-runtime-publish.sh qualify >> "$GITHUB_OUTPUT"
   integrated-node2:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -42,7 +55,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771
         with:
           install_url: https://releases.nixos.org/nix/nix-2.30.2/install
